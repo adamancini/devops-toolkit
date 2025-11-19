@@ -1,0 +1,18 @@
+{
+  "name": "devops-toolkit",
+  "version": "1.0.0",
+  "description": "DevOps and infrastructure management tools including SSL certificate management, AeroSpace window manager configuration, Kubernetes helpers, and cloud provider utilities",
+  "author": "ada",
+  "skills": [
+    {
+      "name": "ssl-cert-manager",
+      "description": "Manage SSL/TLS certificates with Let's Encrypt including wildcard certificates via DNS challenges (automated Google Cloud DNS, Cloudflare, Route53, or manual), certificate inspection, validation, renewal, and Kubernetes secret generation",
+      "path": "${CLAUDE_PLUGIN_ROOT}/skills/ssl-cert-manager/ssl-cert-manager.md"
+    },
+    {
+      "name": "aerospace-config-manager",
+      "description": "Comprehensive AeroSpace window manager configuration management with safe editing, keybinding conflict detection, workspace assignments, backup/rollback, TOML validation, multi-monitor setup, and interactive configuration building",
+      "path": "${CLAUDE_PLUGIN_ROOT}/skills/aerospace-config-manager/aerospace-config-manager.md"
+    }
+  ]
+}
