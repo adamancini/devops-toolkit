@@ -1,8 +1,0 @@
-{
-  "name": "devops-toolkit",
-  "version": "1.0.0",
-  "description": "DevOps and infrastructure management tools including SSL certificate management, AeroSpace window manager configuration, Kubernetes helpers, and cloud provider utilities",
-  "author": "adamancini",
-  "repository": "https://github.com/adamancini/devops-toolkit",
-  "homepage": "https://github.com/adamancini/devops-toolkit"
-}
