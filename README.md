@@ -37,7 +37,7 @@ Comprehensive SSL/TLS certificate management with Let's Encrypt.
 "Create a wildcard certificate for *.example.com using Cloudflare DNS"
 ```
 
-[Full Documentation →](./skills/ssl-cert-manager/)
+[Full Documentation →](./plugins/devops-toolkit/skills/ssl-cert-manager/)
 
 ### AeroSpace Configuration Manager
 
@@ -57,7 +57,7 @@ Safe management of AeroSpace window manager configurations on macOS.
 "Add keybinding for fullscreen toggle"
 ```
 
-[Full Documentation →](./skills/aerospace-config-manager/)
+[Full Documentation →](./plugins/devops-toolkit/skills/aerospace-config-manager/)
 
 ## Installation
 
@@ -164,28 +164,31 @@ User: "Add alt+m for fullscreen"
 ## Architecture
 
 ```
-devops-toolkit/
+devops-toolkit/                              # Marketplace root
 ├── README.md                                # This file
-├── plugin.json                              # Plugin manifest
+├── marketplace.json                         # Marketplace manifest
 ├── CHANGELOG.md                             # Version history
 ├── LICENSE                                  # MIT License
-└── skills/
-    ├── ssl-cert-manager/
-    │   ├── ssl-cert-manager.md             # Skill implementation
-    │   └── README.md                        # Skill documentation
-    └── aerospace-config-manager/
-        ├── aerospace-config-manager.md      # Skill implementation
-        └── README.md                        # Skill documentation
+└── plugins/
+    └── devops-toolkit/                      # Plugin directory
+        ├── plugin.json                      # Plugin manifest
+        └── skills/
+            ├── ssl-cert-manager/
+            │   ├── ssl-cert-manager.md     # Skill implementation
+            │   └── README.md                # Skill documentation
+            └── aerospace-config-manager/
+                ├── aerospace-config-manager.md  # Skill implementation
+                └── README.md                # Skill documentation
 ```
 
 ## Development
 
 ### Adding Skills
 
-1. Create skill directory in `skills/`
+1. Create skill directory in `plugins/devops-toolkit/skills/`
 2. Add skill markdown file (implementation)
 3. Add README.md (user documentation)
-4. Update `plugin.json` manifest
+4. Update `plugins/devops-toolkit/plugin.json` manifest
 5. Update this README and CHANGELOG
 
 ### Testing
@@ -209,11 +212,12 @@ Test skills by invoking in Claude Code:
 ### Plugin Not Loading
 
 ```bash
-# Verify installation
-ls -la ~/.claude/plugins/repos/devops-toolkit/plugin.json
+# Verify marketplace installation
+ls -la ~/.claude/plugins/marketplaces/devops-toolkit/marketplace.json
 
 # Check JSON validity
-cat ~/.claude/plugins/repos/devops-toolkit/plugin.json | python3 -m json.tool
+cat ~/.claude/plugins/marketplaces/devops-toolkit/marketplace.json | python3 -m json.tool
+cat ~/.claude/plugins/marketplaces/devops-toolkit/plugins/devops-toolkit/plugin.json | python3 -m json.tool
 
 # Restart Claude Code
 ```
