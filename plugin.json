@@ -1,7 +1,7 @@
 {
   "name": "devops-toolkit",
-  "version": "1.0.0",
-  "description": "DevOps and infrastructure management tools including SSL certificate management, AeroSpace window manager configuration, Kubernetes helpers, and cloud provider utilities",
+  "version": "1.1.0",
+  "description": "DevOps and infrastructure management tools including SSL certificate management, AeroSpace window manager configuration, Linear MCP operations, Kubernetes helpers, and cloud provider utilities",
   "author": "ada",
   "skills": [
     {
@@ -13,6 +13,11 @@
       "name": "aerospace-config-manager",
       "description": "Comprehensive AeroSpace window manager configuration management with safe editing, keybinding conflict detection, workspace assignments, backup/rollback, TOML validation, multi-monitor setup, and interactive configuration building",
       "path": "${CLAUDE_PLUGIN_ROOT}/skills/aerospace-config-manager/aerospace-config-manager.md"
+    },
+    {
+      "name": "linear-mcp-operations",
+      "description": "Reliable Linear MCP operations with mandatory health checking and response validation. Use when interacting with Linear for issues, projects, teams, or cycles. Ensures MCP connectivity before operations and validates responses to prevent hallucination of issue numbers or stale data.",
+      "path": "${CLAUDE_PLUGIN_ROOT}/skills/linear-mcp-operations/SKILL.md"
     }
   ]
 }
