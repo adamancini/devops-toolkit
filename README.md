@@ -1,6 +1,6 @@
 # DevOps Toolkit
 
-A comprehensive collection of skills for Claude Code focused on DevOps, infrastructure management, and developer productivity.
+A comprehensive collection of agents and skills for Claude Code focused on DevOps, infrastructure management, and developer productivity.
 
 ## Quick Start
 
@@ -17,6 +17,40 @@ Restart Claude Code and invoke skills:
 "Create a wildcard certificate for example.com"
 "Configure aerospace for my workspace"
 ```
+
+## Agents
+
+Specialized agents for project-specific workflows and task automation.
+
+### CLAUDEMD Compliance Checker
+Verifies compliance with project-specific instructions in CLAUDE.md/AGENTS.md files.
+
+### Helm Chart Developer
+Production-quality Helm chart development with Helm 3 standards and best practices.
+
+### Home Manager
+Expert management of home directory structure, dotfiles with yadm, and system configuration.
+
+### Linear Assistant
+Processes verbose Linear MCP responses and returns concise summaries for context optimization.
+
+### Markdown Writer
+Creates, edits, and improves Markdown documents with proper formatting and style compliance.
+
+### MCP Security Validator
+Validates MCP servers for security issues before addition to Claude Code.
+
+### Obsidian Notes
+Expert Obsidian knowledge management for vault operations and Notion synchronization.
+
+### Quality Control Enforcer
+Reviews work to ensure it meets quality standards and avoids common pitfalls.
+
+### Shell Code Optimizer
+Ensures shell scripts follow portability, simplicity, and best practices for cross-platform compatibility.
+
+### YAML Kubernetes Validator
+Validates YAML documents for proper formatting and Kubernetes API specification compliance.
 
 ## Skills Overview
 
@@ -169,16 +203,38 @@ devops-toolkit/
 ├── plugin.json                              # Plugin manifest
 ├── CHANGELOG.md                             # Version history
 ├── LICENSE                                  # MIT License
+├── agents/                                  # Agent definitions
+│   ├── claudemd-compliance-checker.md
+│   ├── helm-chart-developer.md
+│   ├── home-manager.md
+│   ├── linear-assistant.md
+│   ├── markdown-writer.md
+│   ├── mcp-security-validator.md
+│   ├── obsidian-notes.md
+│   ├── quality-control-enforcer.md
+│   ├── shell-code-optimizer.md
+│   └── yaml-kubernetes-validator.md
 └── skills/
     ├── ssl-cert-manager/
     │   ├── ssl-cert-manager.md             # Skill implementation
     │   └── README.md                        # Skill documentation
-    └── aerospace-config-manager/
-        ├── aerospace-config-manager.md      # Skill implementation
+    ├── aerospace-config-manager/
+    │   ├── aerospace-config-manager.md     # Skill implementation
+    │   └── README.md                        # Skill documentation
+    └── linear-mcp-operations/
+        ├── SKILL.md                         # Skill implementation
         └── README.md                        # Skill documentation
 ```
 
 ## Development
+
+### Adding Agents
+
+1. Create agent markdown file in `agents/`
+2. Include YAML frontmatter with description and capabilities
+3. Add detailed agent instructions
+4. Update this README with agent description
+5. Update CHANGELOG.md
 
 ### Adding Skills
 

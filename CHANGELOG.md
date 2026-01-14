@@ -9,10 +9,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Planned
 - Kubernetes helpers (pod debugging, log aggregation)
-- Helm chart validator
 - Docker Compose manager
 - Terraform configuration manager
 - CI/CD pipeline helpers
+
+## [1.2.0] - 2026-01-14
+
+### Added
+- Agents component to plugin structure:
+  - CLAUDEMD Compliance Checker - Verifies project-specific instruction compliance
+  - Helm Chart Developer - Production Helm chart development workflows
+  - Home Manager - Home directory, dotfiles, and system configuration management
+  - Linear Assistant - Context-optimized Linear MCP operations
+  - Markdown Writer - Professional Markdown document creation and editing
+  - MCP Security Validator - Security validation for MCP server installations
+  - Obsidian Notes - Knowledge management and vault operations
+  - Quality Control Enforcer - Quality standards validation
+  - Shell Code Optimizer - Cross-platform shell script best practices
+  - YAML Kubernetes Validator - YAML and K8s manifest validation
+- Linear MCP Operations skill for reliable Linear interactions
+- Updated plugin architecture to include agents directory
+- Enhanced documentation for agent usage and development
+
+### Changed
+- Updated README.md with comprehensive agent documentation
+- Expanded development section with agent creation workflow
+- Updated architecture diagram to reflect agents component
+
+## [1.1.0] - 2026-01-07
+
+### Added
+- Linear MCP Operations skill for reliable Linear interactions with health checking
 
 ## [1.0.0] - 2025-11-19
 
@@ -84,5 +111,7 @@ Both skills emphasize safety, with automatic backups before changes, comprehensi
 
 For detailed changes and migration guides, see individual skill documentation.
 
-[Unreleased]: https://github.com/adamancini/devops-toolkit/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/adamancini/devops-toolkit/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/adamancini/devops-toolkit/compare/v1.1.0...v1.2.0
+[1.1.0]: https://github.com/adamancini/devops-toolkit/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/adamancini/devops-toolkit/releases/tag/v1.0.0
