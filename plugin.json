@@ -1,8 +1,25 @@
 {
   "name": "devops-toolkit",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Comprehensive DevOps agents and skills for infrastructure management, code quality, documentation, and workflow automation. Includes specialized agents for Helm, Kubernetes, Linear, Obsidian, MCP security, and system configuration.",
   "author": "ada",
+  "agents": [
+    {
+      "name": "obsidian-notes",
+      "description": "Use this agent when the user asks to \"create a note\", \"find notes about\", \"organize my vault\", \"configure Obsidian\", \"update my MOCs\", \"track this conversation\", \"search my notes\", \"add to my knowledge base\", \"what do I know about\", \"summarize my notes on\", \"fix my dataview query\", \"create a base\", \"sync notes to Notion\", \"push to Notion\", \"pull from Notion\", or mentions Obsidian vault operations, note-taking, knowledge management, note organization tasks, or Notion synchronization.",
+      "path": "${CLAUDE_PLUGIN_ROOT}/agents/obsidian-notes.md"
+    },
+    {
+      "name": "home-manager",
+      "description": "Use this agent when the user asks to \"organize my home directory\", \"track configuration with yadm\", \"manage dotfiles\", \"generate SSL certificates\", \"organize git repositories\", \"clean up home folder\", \"bootstrap new machine\", \"set up letsencrypt\", \"manage system configuration\", \"clone a repository\", \"configure zsh\", \"add zsh plugin\", \"configure aerospace\", \"update my system\", \"run system updates\", \"update brew yadm pass\", or mentions home directory housekeeping, dotfiles management, shell configuration, window manager configuration, filesystem organization tasks, or system-wide updates.",
+      "path": "${CLAUDE_PLUGIN_ROOT}/agents/home-manager.md"
+    },
+    {
+      "name": "linear-assistant",
+      "description": "Use this agent when you need to interact with Linear for issue tracking, project management, or workflow queries. This agent processes Linear MCP responses and returns concise summaries, preserving context in the main conversation.",
+      "path": "${CLAUDE_PLUGIN_ROOT}/agents/linear-assistant.md"
+    }
+  ],
   "skills": [
     {
       "name": "ssl-cert-manager",
