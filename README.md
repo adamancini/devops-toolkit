@@ -13,7 +13,7 @@ clew sync
 Or install directly:
 ```
 /plugin marketplace add adamancini/devops-toolkit
-/plugin install devops-toolkit@adamancini-devops-toolkit
+/plugin install devops-toolkit@devops-toolkit
 ```
 
 Restart Claude Code and invoke skills:
@@ -121,7 +121,7 @@ clew sync
 
 ```
 /plugin marketplace add adamancini/devops-toolkit
-/plugin install devops-toolkit@adamancini-devops-toolkit
+/plugin install devops-toolkit@devops-toolkit
 ```
 
 Restart Claude Code to load the plugin.
@@ -207,34 +207,41 @@ User: "Add alt+m for fullscreen"
 ## Architecture
 
 ```
-devops-toolkit/
+devops-toolkit/                              # MARKETPLACE
 ├── README.md                                # This file
-├── .claude-plugin/                          # Plugin/marketplace manifests
-│   ├── plugin.json                          # Plugin manifest
-│   └── marketplace.json                     # Marketplace manifest
+├── .claude-plugin/                          # Marketplace manifest
+│   └── marketplace.json                     # Marketplace catalog
 ├── CHANGELOG.md                             # Version history
 ├── LICENSE                                  # MIT License
-├── agents/                                  # Agent definitions
-│   ├── claudemd-compliance-checker.md
-│   ├── helm-chart-developer.md
-│   ├── home-manager.md
-│   ├── linear-assistant.md
-│   ├── markdown-writer.md
-│   ├── mcp-security-validator.md
-│   ├── obsidian-notes.md
-│   ├── quality-control-enforcer.md
-│   ├── shell-code-optimizer.md
-│   └── yaml-kubernetes-validator.md
-└── skills/
-    ├── ssl-cert-manager/
-    │   ├── ssl-cert-manager.md             # Skill implementation
-    │   └── README.md                        # Skill documentation
-    ├── aerospace-config-manager/
-    │   ├── aerospace-config-manager.md     # Skill implementation
-    │   └── README.md                        # Skill documentation
-    └── linear-mcp-operations/
-        ├── SKILL.md                         # Skill implementation
-        └── README.md                        # Skill documentation
+└── plugins/                                 # Plugins directory
+    └── devops-toolkit/                      # PLUGIN
+        ├── .claude-plugin/
+        │   └── plugin.json                  # Plugin manifest
+        ├── agents/                          # Agent definitions
+        │   ├── claudemd-compliance-checker.md
+        │   ├── helm-chart-developer.md
+        │   ├── home-manager.md
+        │   ├── linear-assistant.md
+        │   ├── markdown-writer.md
+        │   ├── mcp-security-validator.md
+        │   ├── obsidian-notes.md
+        │   ├── quality-control-enforcer.md
+        │   ├── shell-code-optimizer.md
+        │   └── yaml-kubernetes-validator.md
+        ├── commands/
+        │   └── repl-proposal.md
+        ├── scripts/
+        │   └── sync-replicated-elements.sh
+        └── skills/
+            ├── ssl-cert-manager/
+            │   ├── ssl-cert-manager.md     # Skill implementation
+            │   └── README.md                # Skill documentation
+            ├── aerospace-config-manager/
+            │   ├── aerospace-config-manager.md
+            │   └── README.md
+            └── linear-mcp-operations/
+                ├── SKILL.md
+                └── README.md
 ```
 
 ## Development
@@ -283,8 +290,8 @@ Test skills by invoking in Claude Code:
 /plugin list
 
 # Verify JSON validity
-python3 -m json.tool < .claude-plugin/plugin.json
 python3 -m json.tool < .claude-plugin/marketplace.json
+python3 -m json.tool < plugins/devops-toolkit/.claude-plugin/plugin.json
 
 # Restart Claude Code
 ```

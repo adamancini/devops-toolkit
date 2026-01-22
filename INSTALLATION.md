@@ -11,7 +11,7 @@ This plugin is now distributed as a marketplace, which provides better version m
 /plugin marketplace add adamancini/devops-toolkit
 
 # Install the plugin
-/plugin install devops-toolkit@adamancini-devops-toolkit
+/plugin install devops-toolkit@devops-toolkit
 
 # Restart Claude Code
 ```
@@ -23,7 +23,7 @@ This plugin is now distributed as a marketplace, which provides better version m
 /plugin marketplace add https://github.com/adamancini/devops-toolkit
 
 # Install the plugin
-/plugin install devops-toolkit@adamancini-devops-toolkit
+/plugin install devops-toolkit@devops-toolkit
 
 # Restart Claude Code
 ```
@@ -37,7 +37,7 @@ After installation and restart, verify the plugin is loaded:
 /plugin list
 
 # You should see:
-# devops-toolkit@adamancini-devops-toolkit
+# devops-toolkit@devops-toolkit
 ```
 
 ## Usage
@@ -77,10 +77,10 @@ To update to the latest version:
 
 ```bash
 # Update the marketplace
-/plugin marketplace update adamancini-devops-toolkit
+/plugin marketplace update devops-toolkit
 
 # Reinstall the plugin
-/plugin install devops-toolkit@adamancini-devops-toolkit
+/plugin install devops-toolkit@devops-toolkit
 
 # Restart Claude Code
 ```
@@ -89,10 +89,10 @@ To update to the latest version:
 
 ```bash
 # Uninstall the plugin
-/plugin uninstall devops-toolkit@adamancini-devops-toolkit
+/plugin uninstall devops-toolkit@devops-toolkit
 
 # Optionally remove the marketplace
-/plugin marketplace remove adamancini-devops-toolkit
+/plugin marketplace remove devops-toolkit
 ```
 
 ## Troubleshooting
@@ -123,8 +123,8 @@ rm -rf ~/.claude/plugins/repos/devops-toolkit
 
 Verify the manifest files are valid:
 ```bash
-python3 -m json.tool < .claude-plugin/plugin.json
 python3 -m json.tool < .claude-plugin/marketplace.json
+python3 -m json.tool < plugins/devops-toolkit/.claude-plugin/plugin.json
 ```
 
 ## Development
@@ -139,13 +139,13 @@ If you're developing this plugin locally:
 2. Add as a local marketplace:
    ```bash
    /plugin marketplace add ~/src/github.com/adamancini/devops-toolkit
-   /plugin install devops-toolkit@adamancini-devops-toolkit
+   /plugin install devops-toolkit@devops-toolkit
    ```
 
 3. Make changes and reinstall:
    ```bash
-   /plugin uninstall devops-toolkit@adamancini-devops-toolkit
-   /plugin install devops-toolkit@adamancini-devops-toolkit
+   /plugin uninstall devops-toolkit@devops-toolkit
+   /plugin install devops-toolkit@devops-toolkit
    # Restart Claude Code
    ```
 
