@@ -1,0 +1,249 @@
+# Makefile.vm - VM creation and management patterns
+# Extracted from progress-platform-services/chef-replicated/chef-360
+
+# Variables (customize these)
+CLUSTER_PREFIX ?= myapp
+VM_DISTRIBUTION ?= ubuntu
+VM_VERSION ?= 24.04
+INSTANCE_TYPE ?= r1.xlarge
+DISK_SIZE ?= 100
+TTL ?= 8h
+SSH_KEY_PATH ?=
+
+# Generalized VM creation recipe
+# Usage: make vm-create-node NODE_NAME=<name> NODE_ROLE=<role> NODE_NUMBER=<num> [NETWORK_ID=<id>]
+.PHONY: vm-create-node
+vm-create-node:
+	@[ "${NODE_NAME}" ] || ( echo ">> NODE_NAME is not set"; exit 1 )
+	@[ "${NODE_ROLE}" ] || ( echo ">> NODE_ROLE is not set"; exit 1 )
+	@[ "${NODE_NUMBER}" ] || ( echo ">> NODE_NUMBER is not set"; exit 1 )
+	@if [ -z "$(NETWORK_ID)" ]; then \
+		echo "Creating first node $(NODE_NAME) (this will establish the network)..."; \
+		replicated vm create \
+			--name $(NODE_NAME) \
+			--distribution $(VM_DISTRIBUTION) --version $(VM_VERSION) \
+			--count 1 --instance-type $(INSTANCE_TYPE) --disk $(DISK_SIZE) --ttl $(TTL) \
+			--tag role=$(NODE_ROLE) --tag node_number=$(NODE_NUMBER) --tag cluster=$(CLUSTER_PREFIX) \
+			$(if $(SSH_KEY_PATH),--ssh-public-key $(SSH_KEY_PATH)) \
+			--wait 5m; \
+		if [ $$? -ne 0 ]; then \
+			echo "Failed to create $(NODE_NAME)"; \
+			exit 1; \
+		fi; \
+		network_id=$$(replicated vm ls --output json | jq -r '.[] | select(.name == "$(NODE_NAME)") | .network_id' | head -1); \
+		echo "Network established by $(NODE_NAME). Network ID: $$network_id"; \
+	else \
+		echo "Creating node $(NODE_NAME) on existing network $(NETWORK_ID)..."; \
+		replicated vm create \
+			--name $(NODE_NAME) \
+			--distribution $(VM_DISTRIBUTION) --version $(VM_VERSION) \
+			--count 1 --instance-type $(INSTANCE_TYPE) --disk $(DISK_SIZE) --ttl $(TTL) \
+			--network $(NETWORK_ID) \
+			--tag role=$(NODE_ROLE) --tag node_number=$(NODE_NUMBER) --tag cluster=$(CLUSTER_PREFIX) \
+			$(if $(SSH_KEY_PATH),--ssh-public-key $(SSH_KEY_PATH)) \
+			--wait 5m; \
+		if [ $$? -ne 0 ]; then \
+			echo "Failed to create $(NODE_NAME)"; \
+			exit 1; \
+		fi; \
+	fi
+	@echo "Successfully created $(NODE_NAME)"
+
+# Helper to get network ID from control-1 node
+.PHONY: vm-get-network-id
+vm-get-network-id:
+	@network_id=$$(replicated vm ls --output json | jq -r '.[] | select(.name == "$(CLUSTER_PREFIX)-control-1") | .network_id' | head -1); \
+	if [ -z "$$network_id" ]; then \
+		echo "Could not find network ID from $(CLUSTER_PREFIX)-control-1. Make sure control-1 node exists."; \
+		exit 1; \
+	fi; \
+	echo "$$network_id"
+
+# 3-node cluster creation (all control plane) - Recommended HA configuration
+.PHONY: vm-3node
+vm-3node:
+	@echo "Checking for existing VMs with prefix '$(CLUSTER_PREFIX)'..."; \
+	existing_vms=$$(replicated vm ls --output json | jq -r '.[] | select(.name | startswith("$(CLUSTER_PREFIX)-")) | .name' | wc -l | tr -d ' '); \
+	if [ "$$existing_vms" -gt 0 ]; then \
+		echo ""; \
+		echo "Cluster with prefix '$(CLUSTER_PREFIX)' already exists:"; \
+		replicated vm ls --output json | jq -r '.[] | select(.name | startswith("$(CLUSTER_PREFIX)-")) | "  - \(.name) (ID: \(.id), Status: \(.status))"'; \
+		echo ""; \
+		echo "To create a new cluster, either:"; \
+		echo "  1. Use a different CLUSTER_PREFIX, or"; \
+		echo "  2. Delete the existing cluster: make vm-cleanup-cluster CLUSTER_PREFIX=$(CLUSTER_PREFIX)"; \
+		echo ""; \
+		exit 0; \
+	fi; \
+	echo "Creating 3-node cluster (all control plane)"; \
+	$(MAKE) vm-create-node NODE_NAME=$(CLUSTER_PREFIX)-control-1 NODE_ROLE=control NODE_NUMBER=1; \
+	echo "Creating remaining control nodes in parallel..."; \
+	network_id=$$($(MAKE) vm-get-network-id 2>/dev/null); \
+	for i in 2 3; do \
+		$(MAKE) vm-create-node NODE_NAME=$(CLUSTER_PREFIX)-control-$$i NODE_ROLE=control NODE_NUMBER=$$i NETWORK_ID=$$network_id & \
+	done; \
+	wait; \
+	echo "3-node cluster creation completed"; \
+	echo "Control nodes: $(CLUSTER_PREFIX)-control-{1,2,3}"; \
+	echo ""; \
+	echo "Next steps:"; \
+	echo "  1. make vm-expose-ports       - Expose admin console and app ports"; \
+	echo "  2. make vm-ssh                - SSH to control-1 for manual operations"
+
+# 6-node cluster creation (3 control + 3 backend)
+.PHONY: vm-6node
+vm-6node:
+	@echo "Checking for existing VMs with prefix '$(CLUSTER_PREFIX)'..."; \
+	existing_vms=$$(replicated vm ls --output json | jq -r '.[] | select(.name | startswith("$(CLUSTER_PREFIX)-")) | .name' | wc -l | tr -d ' '); \
+	if [ "$$existing_vms" -gt 0 ]; then \
+		echo ""; \
+		echo "Cluster with prefix '$(CLUSTER_PREFIX)' already exists:"; \
+		replicated vm ls --output json | jq -r '.[] | select(.name | startswith("$(CLUSTER_PREFIX)-")) | "  - \(.name) (ID: \(.id), Status: \(.status))"'; \
+		echo ""; \
+		echo "To create a new cluster, either:"; \
+		echo "  1. Use a different CLUSTER_PREFIX, or"; \
+		echo "  2. Delete the existing cluster: make vm-cleanup-cluster CLUSTER_PREFIX=$(CLUSTER_PREFIX)"; \
+		echo ""; \
+		exit 0; \
+	fi; \
+	echo "Creating 6-node cluster (3 control + 3 backend)"; \
+	$(MAKE) vm-create-node NODE_NAME=$(CLUSTER_PREFIX)-control-1 NODE_ROLE=control NODE_NUMBER=1; \
+	echo "Creating remaining nodes in parallel..."; \
+	network_id=$$($(MAKE) vm-get-network-id 2>/dev/null); \
+	for i in 2 3; do \
+		$(MAKE) vm-create-node NODE_NAME=$(CLUSTER_PREFIX)-control-$$i NODE_ROLE=control NODE_NUMBER=$$i NETWORK_ID=$$network_id & \
+	done; \
+	for i in 1 2 3; do \
+		$(MAKE) vm-create-node NODE_NAME=$(CLUSTER_PREFIX)-backend-$$i NODE_ROLE=backend NODE_NUMBER=$$i NETWORK_ID=$$network_id & \
+	done; \
+	wait; \
+	echo "6-node cluster creation completed"; \
+	echo "Control nodes: $(CLUSTER_PREFIX)-control-{1,2,3}"; \
+	echo "Backend nodes: $(CLUSTER_PREFIX)-backend-{1,2,3}"
+
+# List all VMs
+.PHONY: vm-list
+vm-list:
+	replicated vm ls
+
+# Cluster status
+.PHONY: vm-status
+vm-status:
+	@echo "Cluster Status for $(CLUSTER_PREFIX):"; \
+	echo ""; \
+	replicated vm ls --output json | \
+	  jq -r '.[] | select(.tags.cluster == "$(CLUSTER_PREFIX)") | "  \(.name): \(.status) (\(.private_ip))"'
+
+# SSH to control-1 node
+.PHONY: vm-ssh
+vm-ssh:
+	@vm_id=$$(replicated vm ls --output json | jq -r '.[] | select(.name == "$(CLUSTER_PREFIX)-control-1") | .id'); \
+	if [ -z "$$vm_id" ]; then \
+		echo "VM $(CLUSTER_PREFIX)-control-1 not found"; \
+		exit 1; \
+	fi; \
+	replicated vm ssh $$vm_id
+
+# Execute command on control-1
+.PHONY: vm-exec-cmd
+vm-exec-cmd:
+	@[ "$(CMD)" ] || (echo "CMD not set. Usage: make vm-exec-cmd CMD='command'"; exit 1)
+	@vm_id=$$(replicated vm ls --output json | jq -r '.[] | select(.name == "$(CLUSTER_PREFIX)-control-1") | .id'); \
+	if [ -z "$$vm_id" ]; then \
+		echo "VM $(CLUSTER_PREFIX)-control-1 not found"; \
+		exit 1; \
+	fi; \
+	replicated vm ssh $$vm_id -- '$(CMD)'
+
+# Execute kubectl command on cluster
+.PHONY: vm-kubectl
+vm-kubectl:
+	@[ "$(CMD)" ] || (echo "CMD not set. Usage: make vm-kubectl CMD='get nodes'"; exit 1)
+	@$(MAKE) vm-exec-cmd CMD='kubectl $(CMD)'
+
+# Expose ports for admin console and application access
+.PHONY: vm-expose-ports
+vm-expose-ports:
+	@echo "Exposing ports on $(CLUSTER_PREFIX)-control-1..."; \
+	vm_id=$$(replicated vm ls --output json | jq -r '.[] | select(.name == "$(CLUSTER_PREFIX)-control-1") | .id'); \
+	if [ -z "$$vm_id" ]; then \
+		echo "VM $(CLUSTER_PREFIX)-control-1 not found"; \
+		exit 1; \
+	fi; \
+	echo "Exposing admin console port (30000)..."; \
+	replicated vm port expose $$vm_id --host-port 30000 --protocols http,https; \
+	echo "Exposing application port (31000)..."; \
+	replicated vm port expose $$vm_id --host-port 31000 --protocols http,https; \
+	echo ""; \
+	echo "Ports exposed. Access URLs:"; \
+	replicated vm port ls $$vm_id --output json | jq -r '.[].url'
+
+# Wait for cluster to be ready
+.PHONY: vm-wait-ready
+vm-wait-ready:
+	@echo "Waiting for cluster $(CLUSTER_PREFIX) to be ready..."; \
+	$(MAKE) vm-exec-cmd CMD=' \
+		until kubectl get nodes 2>/dev/null | grep -q Ready; do \
+			echo "Waiting for nodes..."; \
+			sleep 10; \
+		done; \
+		echo "Cluster ready"; \
+		kubectl get nodes'
+
+# Get kubeconfig from cluster
+.PHONY: vm-get-kubeconfig
+vm-get-kubeconfig:
+	@echo "Retrieving kubeconfig from $(CLUSTER_PREFIX)-control-1..."; \
+	$(MAKE) vm-exec-cmd CMD='sudo cat /var/lib/embedded-cluster/k0s/pki/admin.conf' > $(CLUSTER_PREFIX)-kubeconfig.yaml; \
+	echo "Kubeconfig saved to $(CLUSTER_PREFIX)-kubeconfig.yaml"; \
+	echo ""; \
+	echo "Use with:"; \
+	echo "  export KUBECONFIG=$(CLUSTER_PREFIX)-kubeconfig.yaml"; \
+	echo "  kubectl get nodes"
+
+# Cleanup cluster VMs
+.PHONY: vm-cleanup-cluster
+vm-cleanup-cluster:
+	@echo "Cleaning up VMs for cluster: $(CLUSTER_PREFIX)"; \
+	replicated vm ls --output json | jq -r '.[] | select(.name | startswith("$(CLUSTER_PREFIX)-")) | "\(.id) \(.name)"' | \
+	while read vm_id vm_name; do \
+		echo "Deleting $$vm_name ($$vm_id)..."; \
+		replicated vm rm $$vm_id; \
+	done; \
+	echo "Cleanup completed for $(CLUSTER_PREFIX)"
+
+# Help
+.PHONY: vm-help
+vm-help:
+	@echo "VM Management Makefile"
+	@echo "====================="
+	@echo ""
+	@echo "Cluster Creation:"
+	@echo "  make vm-3node                    - Create 3-node cluster (all control)"
+	@echo "  make vm-6node                    - Create 6-node cluster (3 control + 3 backend)"
+	@echo ""
+	@echo "VM Operations:"
+	@echo "  make vm-list                     - List all VMs"
+	@echo "  make vm-status                   - Show cluster status"
+	@echo "  make vm-ssh                      - SSH to control-1"
+	@echo "  make vm-kubectl CMD='<args>'     - Execute kubectl on cluster"
+	@echo "  make vm-exec-cmd CMD='<command>' - Execute command on control-1"
+	@echo "  make vm-expose-ports             - Expose admin console and app ports"
+	@echo ""
+	@echo "Cluster Management:"
+	@echo "  make vm-wait-ready               - Wait for cluster to be ready"
+	@echo "  make vm-get-kubeconfig           - Retrieve kubeconfig from cluster"
+	@echo "  make vm-cleanup-cluster          - Delete all cluster VMs"
+	@echo ""
+	@echo "Configuration Variables:"
+	@echo "  CLUSTER_PREFIX (default: myapp)  - Cluster name prefix"
+	@echo "  VM_DISTRIBUTION (default: ubuntu)"
+	@echo "  VM_VERSION (default: 24.04)"
+	@echo "  INSTANCE_TYPE (default: r1.xlarge)"
+	@echo "  DISK_SIZE (default: 100)"
+	@echo "  TTL (default: 8h)"
+	@echo ""
+	@echo "Example Usage:"
+	@echo "  make vm-3node CLUSTER_PREFIX=test"
+	@echo "  make vm-kubectl CMD='get nodes' CLUSTER_PREFIX=test"
+	@echo "  make vm-cleanup-cluster CLUSTER_PREFIX=test"

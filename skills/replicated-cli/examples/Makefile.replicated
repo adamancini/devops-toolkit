@@ -1,0 +1,29 @@
+# Makefile.replicated - Replicated release management targets
+
+.PHONY: replicated-instructions
+replicated-instructions:
+	@echo "Most common usage is to cut a release which you would do via a command like\n"
+	@echo "\tmake replicated-release CHANNEL=NoSuchChannel VERSION=0.0.0\n"
+	@echo "\tCHANNEL is an existent Replicated channel the release will be promoted to"
+	@echo "\tVERSION is a semvar label applied that will be applied to the release in Replicated\n"
+	@echo "You will also need to be authenticated to\n"
+	@echo "\tReplicated (try 'replicated login')"
+	@echo "\tAWS (try 'aws login sso', using previously configured chef-integration account)"
+	@echo "\tAWS ECR (try 'make aws-ecr-login')\n"
+
+.PHONY: replicated-release
+replicated-release: replicated-helm-package
+	# replicated release ls --app chef-360 | head -n 5
+	@[ "${CHANNEL}" ] || ( echo ">> CHANNEL is not set"; exit 1 )
+	@[ "${VERSION}" ] || ( echo ">> VERSION is not set"; exit 1 )
+	replicated release create --app chef-360 --yaml-dir manifests --lint --promote $(CHANNEL) --version $(VERSION) | grep -v 'nonexistent-status-informer-object'
+	# replicated release ls --app chef-360 | head -n 5
+
+.PHONY: replicated-lint
+replicated-lint: replicated-helm-package
+	replicated release lint --app chef-360 --yaml-dir manifests | grep -v 'nonexistent-status-informer-object'
+
+.PHONY: replicated-helm-package
+replicated-helm-package:
+	rm -f manifests/*.tgz
+	helm package ./helm --destination manifests --dependency-update

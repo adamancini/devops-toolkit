@@ -1,6 +1,6 @@
 {
   "name": "devops-toolkit",
-  "version": "1.2.2",
+  "version": "1.3.0",
   "description": "Comprehensive DevOps agents and skills for infrastructure management, code quality, documentation, and workflow automation. Includes specialized agents for Helm, Kubernetes, Linear, Obsidian, MCP security, and system configuration.",
   "author": "ada",
   "agents": [
@@ -125,6 +125,36 @@
       "name": "linear-mcp-operations",
       "description": "Reliable Linear MCP operations with mandatory health checking and response validation. Use when interacting with Linear for issues, projects, teams, or cycles. Ensures MCP connectivity before operations and validates responses to prevent hallucination of issue numbers or stale data.",
       "path": "${CLAUDE_PLUGIN_ROOT}/skills/linear-mcp-operations/SKILL.md"
+    },
+    {
+      "name": "git-repo-organizer",
+      "description": "Use when cloning repositories, deciding where to place a project, reorganizing misplaced repos, checking for Go vs non-Go projects, or auditing repository locations across the home directory.",
+      "path": "${CLAUDE_PLUGIN_ROOT}/skills/git-repo-organizer/SKILL.md"
+    },
+    {
+      "name": "notion-sync",
+      "description": "Use when syncing Obsidian notes to Notion, pushing notes to Notion, pulling from Notion, setting up Notion sync, or mentioning Notion integration with the vault.",
+      "path": "${CLAUDE_PLUGIN_ROOT}/skills/notion-sync/SKILL.md"
+    },
+    {
+      "name": "replicated-cli",
+      "description": "This skill should be used when the user asks to 'create a Replicated release', 'promote a release', 'manage CMX VMs', 'create a CMX cluster', 'SSH to a CMX VM', 'install Embedded Cluster', 'lint Replicated manifests', 'execute commands on CMX VMs', 'monitor cluster status', or mentions Replicated release workflows, VM testing, or compatibility matrix operations.",
+      "path": "${CLAUDE_PLUGIN_ROOT}/skills/replicated-cli/SKILL.md"
+    },
+    {
+      "name": "system-updates",
+      "description": "This skill should be used when the user asks to 'update my system', 'run system updates', 'update everything', 'update brew yadm pass', or mentions running comprehensive system updates including Homebrew, yadm, and pass.",
+      "path": "${CLAUDE_PLUGIN_ROOT}/skills/system-updates/SKILL.md"
+    },
+    {
+      "name": "yadm-utilities",
+      "description": "This skill should be used when the user asks to 'track files with yadm', 'check yadm status', 'commit to yadm', 'sync dotfiles', 'add to yadm', 'manage Claude Code configuration with yadm', 'what should I track in yadm', 'use yadm alternates', 'create OS-specific dotfiles', 'configure yadm for multiple machines', 'bootstrap yadm', 'run yadm bootstrap', 'setup new machine with yadm', or mentions yadm operations for dotfiles management.",
+      "path": "${CLAUDE_PLUGIN_ROOT}/skills/yadm-utilities/SKILL.md"
+    },
+    {
+      "name": "zsh-config-manager",
+      "description": "Use when adding shell configuration for a new tool, creating zsh component files, configuring shell completions, using yadm alternates for OS-specific shell config, or troubleshooting modular zsh setup in conf.d structure.",
+      "path": "${CLAUDE_PLUGIN_ROOT}/skills/zsh-config-manager/SKILL.md"
     }
   ]
 }
