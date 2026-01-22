@@ -26,12 +26,12 @@ Please describe what your goals are:
 
 You SHOULD use the following subagents (and any subagents they recommend) to help the user with their request:
 
-- proposal-needed
-- proposal-writer
+- repl-proposal-needed
+- repl-proposal-writer
 
 ## Shortcut (tickets and stories)
 
-If the user's request references a ticket or shortcut story, use the shortcut agent to find the story. 
+If the user's request references a ticket or shortcut story, use the repl-shortcut agent to find the story. 
 Never update the shortcut story with anything. At this time, you should treat Shortcut as a readonly API.
 
 

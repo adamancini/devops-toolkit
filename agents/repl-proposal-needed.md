@@ -1,6 +1,6 @@
 ---
-name: proposal-needed
-description: MUST USE THIS AGENT PROACTIVELY when you need to decide if a proposal should be written for a change.
+name: repl-proposal-needed
+description: MUST USE THIS AGENT PROACTIVELY when you need to decide if a proposal should be written for a Replicated change.
 model: sonnet
 color: teal
 ---

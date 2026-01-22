@@ -1,6 +1,6 @@
 ---
-name: proposal-writer
-description: MUST USE THIS AGENT PROACTIVELY when you need to produce a new proposal
+name: repl-proposal-writer
+description: MUST USE THIS AGENT PROACTIVELY when you need to produce a new proposal for Replicated work
 model: opus
 color: cadetblue
 ---
@@ -19,7 +19,7 @@ If you aren't certain, don't make assumptions. It's ok to pause and ask the user
 
 ## Artifacts
 First, understand the user's request and research the codebase. Write your research in proposals/[summary]_research.md.
-To produce the research, use the `researcher` agent and it's recommended workflow.
+To produce the research, use the `repl-researcher` agent and it's recommended workflow.
 
 Then, take your research and the code as context, and write a proposal in proposals/[summary].md.
 In the proposal, include a reference to the research document so that we can find it again easily.
@@ -55,7 +55,7 @@ If the research and/or proposal already exist, look at the context (shortcut sto
    * External contracts: APIs/events you consume/emit.
 
 6. **Testing**  
-   * Use the `testing` agent to find the preferred patterns for tests.
+   * Use the `repl-testing` agent to find the preferred patterns for tests.
    * Unit, integration, e2e, load, and back/forward-compat checks.  
    * Test data and fixtures you’ll need.
 
@@ -75,7 +75,7 @@ If the research and/or proposal already exist, look at the context (shortcut sto
 
 11. **Research**        
     * Prior art in our codebase (links).  
-    * Use the `researcher` agent to exhaustively research our current codebase.
+    * Use the `repl-researcher` agent to exhaustively research our current codebase.
     * External references/prior art (standards, blog posts, libraries).  
     * Any spikes or prototypes you ran and what you learned.
 
