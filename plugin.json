@@ -1,6 +1,6 @@
 {
   "name": "devops-toolkit",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "Comprehensive DevOps agents and skills for infrastructure management, code quality, documentation, and workflow automation. Includes specialized agents for Helm, Kubernetes, Linear, Obsidian, MCP security, and system configuration.",
   "author": "ada",
   "agents": [
@@ -18,6 +18,96 @@
       "name": "linear-assistant",
       "description": "Use this agent when you need to interact with Linear for issue tracking, project management, or workflow queries. This agent processes Linear MCP responses and returns concise summaries, preserving context in the main conversation.",
       "path": "${CLAUDE_PLUGIN_ROOT}/agents/linear-assistant.md"
+    },
+    {
+      "name": "claudemd-compliance-checker",
+      "description": "Use this agent when you need to verify that code, configurations, or workflows comply with project-specific instructions defined in CLAUDE.md or AGENTS.md files. Invoke proactively after completing tasks involving code standards, git commits, MCP server installation, build system changes, Helm charts, Kubernetes manifests, or infrastructure configurations.",
+      "path": "${CLAUDE_PLUGIN_ROOT}/agents/claudemd-compliance-checker.md"
+    },
+    {
+      "name": "codebase-analyzer",
+      "description": "Analyzes codebase implementation details. Call the codebase-analyzer agent when you need to find detailed information about specific components, trace data flow, understand HOW code works with precise file:line references.",
+      "path": "${CLAUDE_PLUGIN_ROOT}/agents/codebase-analyzer.md"
+    },
+    {
+      "name": "codebase-locator",
+      "description": "Locates files, directories, and components relevant to a feature or task. A \"Super Grep/Glob/LS tool\" - use it when you need to find WHERE code lives in a codebase without analyzing contents.",
+      "path": "${CLAUDE_PLUGIN_ROOT}/agents/codebase-locator.md"
+    },
+    {
+      "name": "codebase-pattern-finder",
+      "description": "Finds similar implementations, usage examples, or existing patterns that can be modeled after. Returns concrete code examples with file:line references - like codebase-locator but also provides code details.",
+      "path": "${CLAUDE_PLUGIN_ROOT}/agents/codebase-pattern-finder.md"
+    },
+    {
+      "name": "helm-chart-developer",
+      "description": "Use this agent when you need to create, review, or improve Helm charts for Kubernetes deployments. Specializes in Helm 3 standards, security best practices, proper templating, values structure, dependency management, and production-ready chart architecture.",
+      "path": "${CLAUDE_PLUGIN_ROOT}/agents/helm-chart-developer.md"
+    },
+    {
+      "name": "markdown-writer",
+      "description": "Use this agent when you need to create, edit, or improve Markdown documents with proper formatting, markdownlint compliance, and professional tone. Includes documentation, README files, technical guides, or any Markdown-formatted content.",
+      "path": "${CLAUDE_PLUGIN_ROOT}/agents/markdown-writer.md"
+    },
+    {
+      "name": "mcp-security-validator",
+      "description": "Validates MCP servers for security issues before addition to Claude Code. Checks Backslash MCP Security Hub, Snyk Advisor, known threats, and provides APPROVE/BLOCK/REVIEW recommendations with detailed security reports.",
+      "path": "${CLAUDE_PLUGIN_ROOT}/agents/mcp-security-validator.md"
+    },
+    {
+      "name": "quality-control-enforcer",
+      "description": "Use this agent when you need to review and validate work to ensure it meets quality standards. Identifies workarounds, simulated success, incomplete implementations, and demands root cause analysis with proper fixes.",
+      "path": "${CLAUDE_PLUGIN_ROOT}/agents/quality-control-enforcer.md"
+    },
+    {
+      "name": "shell-code-optimizer",
+      "description": "Use this agent when you need to write, review, or improve shell scripts with focus on portability, simplicity, and best practices. Ensures cross-platform compatibility between Linux and macOS, shellcheck compliance, and testability with shellspec.",
+      "path": "${CLAUDE_PLUGIN_ROOT}/agents/shell-code-optimizer.md"
+    },
+    {
+      "name": "web-search-researcher",
+      "description": "Use this agent when you need information that is modern and potentially only discoverable on the web. Conducts deep web research to find and synthesize answers from authoritative sources with proper citations and links.",
+      "path": "${CLAUDE_PLUGIN_ROOT}/agents/web-search-researcher.md"
+    },
+    {
+      "name": "yaml-kubernetes-validator",
+      "description": "Use this agent when you need to write, review, or validate YAML documents, especially Kubernetes manifests and Helm charts. Ensures YAML files conform to best practices, proper indentation, and Kubernetes API specifications using yaml-language-server standards.",
+      "path": "${CLAUDE_PLUGIN_ROOT}/agents/yaml-kubernetes-validator.md"
+    },
+    {
+      "name": "repl-proposal-needed",
+      "description": "MUST USE THIS AGENT PROACTIVELY when you need to decide if a proposal should be written for a Replicated change. Evaluates scope, risk, cross-team impact, public contracts, security implications, and one-way doors.",
+      "path": "${CLAUDE_PLUGIN_ROOT}/agents/repl-proposal-needed.md"
+    },
+    {
+      "name": "repl-proposal-writer",
+      "description": "MUST USE THIS AGENT PROACTIVELY when you need to produce a new proposal for Replicated work. Creates comprehensive proposals with TL;DR, problem statement, design, database changes, implementation plan, testing strategy, and trade-offs.",
+      "path": "${CLAUDE_PLUGIN_ROOT}/agents/repl-proposal-writer.md"
+    },
+    {
+      "name": "repl-proposals-analyzer",
+      "description": "The Replicated research equivalent of codebase-analyzer. Use this agent when wanting to deep dive on a Replicated research topic to extract high-value insights from proposals documents.",
+      "path": "${CLAUDE_PLUGIN_ROOT}/agents/repl-proposals-analyzer.md"
+    },
+    {
+      "name": "repl-proposals-locator",
+      "description": "Discovers relevant documents in Replicated proposals/ directory. The proposals equivalent of codebase-locator - finds and categorizes existing proposals, research, and documentation without deep analysis.",
+      "path": "${CLAUDE_PLUGIN_ROOT}/agents/repl-proposals-locator.md"
+    },
+    {
+      "name": "repl-researcher",
+      "description": "MUST USE THIS AGENT PROACTIVELY when you need to conduct research into the existing Replicated codebase prior to planning an implementation. Uses parallel sub-agents for comprehensive codebase and proposals research.",
+      "path": "${CLAUDE_PLUGIN_ROOT}/agents/repl-researcher.md"
+    },
+    {
+      "name": "repl-shortcut",
+      "description": "MUST USE THIS AGENT PROACTIVELY when you need to query, create, or edit Shortcut stories (tickets/issues) for Replicated work. Manages the work tracking and maintains thorough records.",
+      "path": "${CLAUDE_PLUGIN_ROOT}/agents/repl-shortcut.md"
+    },
+    {
+      "name": "repl-testing",
+      "description": "MUST USE THIS AGENT PROACTIVELY when designing a plan to write tests for Replicated projects. Provides guidance on test patterns: avoiding mocks, no dependency injection, isolated fixtures.",
+      "path": "${CLAUDE_PLUGIN_ROOT}/agents/repl-testing.md"
     }
   ],
   "skills": [
