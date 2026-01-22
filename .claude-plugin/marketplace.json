@@ -1,0 +1,15 @@
+{
+  "name": "adamancini-devops-toolkit",
+  "owner": {
+    "name": "Adam Ancini"
+  },
+  "description": "Personal DevOps toolkit with comprehensive agents and skills for infrastructure management, code quality, and workflow automation",
+  "plugins": [
+    {
+      "name": "devops-toolkit",
+      "source": "./",
+      "version": "1.3.0",
+      "description": "Comprehensive DevOps agents and skills for infrastructure management, code quality, documentation, and workflow automation. Includes specialized agents for Helm, Kubernetes, Linear, Obsidian, MCP security, and system configuration."
+    }
+  ]
+}

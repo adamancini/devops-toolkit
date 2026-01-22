@@ -4,12 +4,16 @@ A comprehensive collection of agents and skills for Claude Code focused on DevOp
 
 ## Quick Start
 
+Add to your `Clewfile`:
 ```bash
-# Install via Claude Code
-/plugins install https://github.com/adamancini/devops-toolkit
+echo "adamancini/devops-toolkit" >> ~/.claude/Clewfile
+clew sync
+```
 
-# Or clone manually
-git clone https://github.com/adamancini/devops-toolkit ~/.claude/plugins/repos/devops-toolkit
+Or install directly:
+```
+/plugin marketplace add adamancini/devops-toolkit
+/plugin install devops-toolkit@adamancini-devops-toolkit
 ```
 
 Restart Claude Code and invoke skills:
@@ -101,18 +105,23 @@ Safe management of AeroSpace window manager configurations on macOS.
 - **SSL Cert Manager**: Docker, DNS provider access
 - **AeroSpace Manager**: [AeroSpace](https://github.com/nikitabobko/AeroSpace), Python 3.11+
 
-### Via Claude Code
+### Recommended: Via Clewfile
 
+Add to `~/.claude/Clewfile`:
 ```
-/plugins install https://github.com/adamancini/devops-toolkit
+adamancini/devops-toolkit
 ```
 
-### Manual Installation
-
+Then sync:
 ```bash
-mkdir -p ~/.claude/plugins/repos
-cd ~/.claude/plugins/repos
-git clone https://github.com/adamancini/devops-toolkit
+clew sync
+```
+
+### Direct Installation
+
+```
+/plugin marketplace add adamancini/devops-toolkit
+/plugin install devops-toolkit@adamancini-devops-toolkit
 ```
 
 Restart Claude Code to load the plugin.
@@ -200,7 +209,9 @@ User: "Add alt+m for fullscreen"
 ```
 devops-toolkit/
 ├── README.md                                # This file
-├── plugin.json                              # Plugin manifest
+├── .claude-plugin/                          # Plugin/marketplace manifests
+│   ├── plugin.json                          # Plugin manifest
+│   └── marketplace.json                     # Marketplace manifest
 ├── CHANGELOG.md                             # Version history
 ├── LICENSE                                  # MIT License
 ├── agents/                                  # Agent definitions
@@ -265,11 +276,15 @@ Test skills by invoking in Claude Code:
 ### Plugin Not Loading
 
 ```bash
-# Verify installation
-ls -la ~/.claude/plugins/repos/devops-toolkit/plugin.json
+# Verify marketplace is added
+/plugin marketplace list
 
-# Check JSON validity
-cat ~/.claude/plugins/repos/devops-toolkit/plugin.json | python3 -m json.tool
+# Check if plugin is installed
+/plugin list
+
+# Verify JSON validity
+python3 -m json.tool < .claude-plugin/plugin.json
+python3 -m json.tool < .claude-plugin/marketplace.json
 
 # Restart Claude Code
 ```
