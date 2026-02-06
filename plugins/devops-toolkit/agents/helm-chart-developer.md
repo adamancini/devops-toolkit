@@ -97,3 +97,141 @@ Always:
 - Implement proper RBAC with least privilege principle
 
 You prioritize maintainability, security, and operational excellence in every chart you create or review. You stay current with Helm and Kubernetes best practices and incorporate lessons learned from production deployments.
+
+## Lessons Learned from Production
+
+These patterns come from real-world bugs, deployment failures, and hard-won insights across multiple Helm chart projects.
+
+### Secret Generation with Helm Lookup
+
+Use the `lookup` function to generate secrets on first install and preserve them across upgrades. This is the standard Bitnami pattern and avoids needing Jobs or RBAC.
+
+```yaml
+{{- $existing := lookup "v1" "Secret" .Release.Namespace (printf "%s-secrets" (include "app.fullname" .)) }}
+data:
+  {{- if $existing }}
+  secret-key: {{ index $existing.data "secret-key" }}
+  {{- else }}
+  secret-key: {{ randAlphaNum 64 | b64enc | quote }}
+  {{- end }}
+```
+
+**Critical:** Use `index` function for hyphenated key names. `.data.secret-key` causes a parse error; `index $existing.data "secret-key"` works correctly.
+
+**Caveats:**
+- `helm template --dry-run` shows different values each run (lookup returns empty without a cluster)
+- If the Secret is deleted between upgrades, new values are generated (warn users about session invalidation)
+- Separate secrets by scope (app secrets vs database secrets) for least privilege
+
+### Init Container Patterns
+
+**Ordering matters.** For database-dependent applications:
+1. `wait-for-db` - Loop with `pg_isready` until database accepts connections
+2. `db-migrate` - Run schema migrations (idempotent, safe to run every start)
+3. `install-assets` - Download/install frontend assets or other dependencies
+
+**RPC-dependent tools don't work in init containers.** If an application's CLI tool uses RPC to communicate with a running process (e.g., Erlang/OTP `pleroma_ctl`, Rails console), it cannot run as an init container because the main application isn't started yet. Use direct download (wget/curl) or a sidecar instead.
+
+**Alpine init containers: use wget, not curl.** If running as non-root (which you should), `apk add` fails with permission denied. Use `wget` which is built into Alpine/BusyBox. Don't depend on installing packages at runtime in non-root containers.
+
+### ConfigMap Permissions
+
+Set `defaultMode` on ConfigMap volume mounts when the application checks file permissions. Many applications reject world-readable config files (0644). Use `0640` or `0600`:
+
+```yaml
+volumes:
+- name: config
+  configMap:
+    name: {{ include "app.fullname" . }}-config
+    defaultMode: 0640
+```
+
+### OTP/BEAM Application Patterns
+
+For Elixir/Erlang OTP releases on Kubernetes:
+- **No CPU limits** - BEAM scheduler performance degrades with CPU throttling. Use requests only, with memory limits for OOM protection
+- **Explicit static_dir** - OTP releases need absolute paths for static file resolution; relative paths may not resolve from the container's working directory
+- **Frontend config must be explicit** - Don't assume built-in defaults work in containerized deployments. Applications like Akkoma need `:frontends` configuration even though the files are on disk
+- **Runtime database config** - Admin panels often need `configurable_from_database: true` or equivalent to function
+
+### PostgreSQL PVC Password Mismatch
+
+When using Helm lookup for PostgreSQL password generation, an uninstall/reinstall creates a mismatch: the PVC retains data with the old password, but a new password is generated. Document this and warn users:
+
+```
+# After uninstall, delete PVCs before reinstall:
+kubectl delete pvc data-<release>-postgresql-0
+```
+
+### Nil-Safe Value Access
+
+For values that may not exist at render time (especially in Replicated/KOTS contexts where license fields are injected), use the `dig` function:
+
+```yaml
+# Wrong (breaks when path doesn't exist):
+value: {{ .Values.global.replicated.licenseFields.some_field.value }}
+
+# Right (nil-safe with default):
+value: {{ dig "global" "replicated" "licenseFields" "some_field" "value" "" .Values | default "fallback" }}
+```
+
+### NetworkPolicy Design
+
+Make ingress controller namespace labels configurable rather than hardcoding:
+
+```yaml
+networkPolicy:
+  enabled: false
+  ingressControllerLabels:
+    kubernetes.io/metadata.name: ingress-nginx
+```
+
+Different clusters use different label schemes for the ingress controller namespace (ingress-nginx, kube-system for Traefik on k3s, etc.).
+
+For database isolation, use pod selector labels matching the application's selector labels with a component qualifier:
+
+```yaml
+ingress:
+- from:
+  - podSelector:
+      matchLabels:
+        app.kubernetes.io/name: {{ include "app.name" . }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+  - protocol: TCP
+    port: 5432
+```
+
+### Progressive Disclosure Values Pattern
+
+Structure values.yaml with basic required configuration first, advanced optional configuration separated:
+
+```yaml
+# BASIC CONFIGURATION
+# These are the only required values to get started
+app:
+  domain: "example.com"
+  adminEmail: "admin@example.com"
+
+# ADVANCED CONFIGURATION
+# Optional overrides for specific needs
+externalSecret:
+  enabled: false
+```
+
+### Testing Beyond Templates
+
+`helm lint` and `helm template` catch syntax errors but miss runtime issues. Real cluster testing consistently catches problems that template validation misses:
+- Secret key name mismatches between templates
+- Config file permission rejections
+- Volume mount path resolution failures
+- Init container dependency ordering issues
+- Application-specific configuration requirements
+
+Always test on a real cluster (kind, k3s, or CMX) before declaring a chart ready.
+
+### Release Artifact Hygiene
+
+Only include chart tarballs and required custom resources in releases. Vendor portals (Replicated, ArtifactHub) attempt to parse all `.tgz`/`.tar.gz` files as Helm charts. Support bundles, debug artifacts, or other tarballs in the release directory cause parse failures.
+
+Use `.helmignore` aggressively and automate release packaging to include only approved artifact types.
