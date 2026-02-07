@@ -1,7 +1,7 @@
 ---
 name: proxmox-manager
 description: Use when the user asks to "create a proxmox VM", "make a VM template", "migrate VM", "check proxmox status", "evacuate node", "manage proxmox snapshots", "import cloud image", "spin up a cluster", "tear down cluster", "check node health", "list VMs", "clone template", "upload ISO", "manage proxmox storage", "create proxmox API token", "bootstrap proxmox credentials", or mentions Proxmox VE cluster operations, VM lifecycle management, template creation, node maintenance, or cluster provisioning.
-version: 0.1.0
+version: 0.2.0
 ---
 
 # Proxmox Manager Skill
@@ -111,6 +111,228 @@ curl -sk -o /dev/null -w "%{http_code}" \
 ```
 
 Expected: `200`. If `401`, credentials are invalid. If `000`, node is unreachable.
+
+## Core Operations Reference
+
+This section provides concrete API endpoints and examples for the most common operations. All examples use the placeholders defined in `cluster-config.yaml`:
+- `<PASS_PATH>` -- `credentials.pass_path`
+- `<NODE_HOST>` -- any `cluster.nodes[].host`
+- `<SSH_USER>` -- `credentials.ssh_user`
+
+### Cluster & Node Status
+
+**Cluster health and node membership:**
+
+```bash
+curl -sk \
+  -H "Authorization: PVEAPIToken=$(pass show <PASS_PATH> | head -1)=$(pass show <PASS_PATH> | tail -1)" \
+  "https://<NODE_HOST>:8006/api2/json/cluster/status" \
+  | jq '.data[] | {name, type, online}'
+```
+
+Returns cluster name, quorum status, and each node's online state.
+
+**Per-node resource usage:**
+
+```bash
+curl -sk \
+  -H "Authorization: PVEAPIToken=$(pass show <PASS_PATH> | head -1)=$(pass show <PASS_PATH> | tail -1)" \
+  "https://<NODE_HOST>:8006/api2/json/nodes/<NODE_NAME>/status" \
+  | jq '{cpu: .data.cpu, memory_used: .data.memory.used, memory_total: .data.memory.total, uptime: .data.uptime}'
+```
+
+Replace `<NODE_NAME>` with the node's short name (e.g., `pve01`). Returns CPU load (0-1 float), memory bytes, and uptime in seconds.
+
+### VM Status & Listing
+
+**List all VMs across the cluster:**
+
+```bash
+curl -sk \
+  -H "Authorization: PVEAPIToken=$(pass show <PASS_PATH> | head -1)=$(pass show <PASS_PATH> | tail -1)" \
+  "https://<NODE_HOST>:8006/api2/json/cluster/resources?type=vm" \
+  | jq '.data[] | {vmid, name, status, node, maxcpu: .maxcpu, maxmem: (.maxmem / 1073741824 | floor | tostring + "G"), template}'
+```
+
+**Individual VM status:**
+
+```bash
+curl -sk \
+  -H "Authorization: PVEAPIToken=$(pass show <PASS_PATH> | head -1)=$(pass show <PASS_PATH> | tail -1)" \
+  "https://<NODE_HOST>:8006/api2/json/nodes/<NODE_NAME>/qemu/<VMID>/status/current" \
+  | jq '.data | {status, pid, cpu, mem, maxmem, uptime, qmpstatus}'
+```
+
+**Filter VMs by status:**
+
+```bash
+# Running VMs only
+curl -sk \
+  -H "Authorization: PVEAPIToken=$(pass show <PASS_PATH> | head -1)=$(pass show <PASS_PATH> | tail -1)" \
+  "https://<NODE_HOST>:8006/api2/json/cluster/resources?type=vm" \
+  | jq '[.data[] | select(.status == "running") | {vmid, name, node}]'
+```
+
+**List templates:**
+
+```bash
+# By template flag
+curl -sk \
+  -H "Authorization: PVEAPIToken=$(pass show <PASS_PATH> | head -1)=$(pass show <PASS_PATH> | tail -1)" \
+  "https://<NODE_HOST>:8006/api2/json/cluster/resources?type=vm" \
+  | jq '[.data[] | select(.template == 1) | {vmid, name, node}]'
+```
+
+Templates can also be identified by tag (see `tags.templates` in `cluster-config.yaml`), or by VMID range -- templates use VMIDs in the `vmid_ranges.templates` range.
+
+### VM Creation from Template (Clone)
+
+**Full clone from an existing template:**
+
+```bash
+curl -sk -X POST \
+  -H "Authorization: PVEAPIToken=$(pass show <PASS_PATH> | head -1)=$(pass show <PASS_PATH> | tail -1)" \
+  -d "newid=<NEW_VMID>&name=<VM_NAME>&full=1&target=<TARGET_NODE>&storage=<STORAGE>" \
+  "https://<NODE_HOST>:8006/api2/json/nodes/<TEMPLATE_NODE>/qemu/<TEMPLATE_VMID>/clone"
+```
+
+Parameters:
+- `newid` -- VMID for the new VM (allocate from `vmid_ranges.vms`)
+- `name` -- hostname for the new VM
+- `full` -- `1` for a full (independent) clone; omit or `0` for linked clone
+- `target` -- destination node name (omit to clone on the same node)
+- `storage` -- target storage (use `defaults.storage` from cluster-config)
+
+The clone endpoint returns a task UPID. Poll `GET /nodes/<NODE_NAME>/tasks/<UPID>/status` until `status == "stopped"` and `exitstatus == "OK"`.
+
+**Post-clone configuration (CPU, memory, network, cloud-init):**
+
+```bash
+curl -sk -X PUT \
+  -H "Authorization: PVEAPIToken=$(pass show <PASS_PATH> | head -1)=$(pass show <PASS_PATH> | tail -1)" \
+  -d "cores=<CORES>&memory=<MEM_MB>&net0=virtio,bridge=<BRIDGE>&ipconfig0=ip=dhcp&ciuser=<CI_USER>&sshkeys=<URL_ENCODED_KEYS>" \
+  "https://<NODE_HOST>:8006/api2/json/nodes/<NODE_NAME>/qemu/<NEW_VMID>/config"
+```
+
+Notes:
+- `memory` is in MB (e.g., `4096` for 4 GB)
+- `sshkeys` must be URL-encoded (use `jq -sRr @uri < ~/.ssh/authorized_keys`)
+- `ciuser` defaults to `cloudinit.default_user` from cluster-config
+- Apply `defaults.network_bridge` from cluster-config unless overridden
+
+### VM Start / Stop / Shutdown / Reboot
+
+All power operations are POST requests to the VM's status endpoint. They return a task UPID.
+
+**Start:**
+
+```bash
+curl -sk -X POST \
+  -H "Authorization: PVEAPIToken=$(pass show <PASS_PATH> | head -1)=$(pass show <PASS_PATH> | tail -1)" \
+  "https://<NODE_HOST>:8006/api2/json/nodes/<NODE_NAME>/qemu/<VMID>/status/start"
+```
+
+**Shutdown (graceful via ACPI):**
+
+```bash
+curl -sk -X POST \
+  -H "Authorization: PVEAPIToken=$(pass show <PASS_PATH> | head -1)=$(pass show <PASS_PATH> | tail -1)" \
+  "https://<NODE_HOST>:8006/api2/json/nodes/<NODE_NAME>/qemu/<VMID>/status/shutdown"
+```
+
+Sends an ACPI shutdown signal. Requires the QEMU guest agent (`defaults.guest_agent: true`) or ACPI support in the guest OS. The VM may take time to shut down gracefully.
+
+**Stop (immediate -- use with caution):**
+
+```bash
+curl -sk -X POST \
+  -H "Authorization: PVEAPIToken=$(pass show <PASS_PATH> | head -1)=$(pass show <PASS_PATH> | tail -1)" \
+  "https://<NODE_HOST>:8006/api2/json/nodes/<NODE_NAME>/qemu/<VMID>/status/stop"
+```
+
+Equivalent to pulling the power cord. May cause data loss or filesystem corruption. Prefer `shutdown` unless the VM is unresponsive.
+
+**Reboot:**
+
+```bash
+curl -sk -X POST \
+  -H "Authorization: PVEAPIToken=$(pass show <PASS_PATH> | head -1)=$(pass show <PASS_PATH> | tail -1)" \
+  "https://<NODE_HOST>:8006/api2/json/nodes/<NODE_NAME>/qemu/<VMID>/status/reboot"
+```
+
+### VM Deletion
+
+**Delete a VM and its disks:**
+
+```bash
+curl -sk -X DELETE \
+  -H "Authorization: PVEAPIToken=$(pass show <PASS_PATH> | head -1)=$(pass show <PASS_PATH> | tail -1)" \
+  "https://<NODE_HOST>:8006/api2/json/nodes/<NODE_NAME>/qemu/<VMID>?purge=1&destroy-unreferenced-disks=1"
+```
+
+Parameters:
+- `purge=1` -- remove the VM from backup jobs, replication, and HA configuration
+- `destroy-unreferenced-disks=1` -- delete any orphaned disk images
+
+**IMPORTANT:** This is a destructive, irreversible operation. Before executing:
+1. Confirm the VMID and VM name with the user
+2. Verify the VM is stopped (stop it first if running)
+3. Never delete VMs in the `vmid_ranges.templates` range without explicit confirmation
+
+### VM Resize
+
+**CPU and memory (config change):**
+
+```bash
+curl -sk -X PUT \
+  -H "Authorization: PVEAPIToken=$(pass show <PASS_PATH> | head -1)=$(pass show <PASS_PATH> | tail -1)" \
+  -d "cores=<CORES>&memory=<MEM_MB>" \
+  "https://<NODE_HOST>:8006/api2/json/nodes/<NODE_NAME>/qemu/<VMID>/config"
+```
+
+- CPU cores and memory can be changed while the VM is stopped and take effect on next start
+- CPU hotplug: works if the VM's `hotplug` config includes `cpu` (not enabled by default)
+- Memory hotplug: works if `hotplug` includes `memory` and the guest OS supports DIMM hotplug (not common)
+- **In practice, stop the VM before resizing CPU or memory**
+
+**Disk resize (grow only):**
+
+```bash
+curl -sk -X PUT \
+  -H "Authorization: PVEAPIToken=$(pass show <PASS_PATH> | head -1)=$(pass show <PASS_PATH> | tail -1)" \
+  -d "disk=scsi0&size=+10G" \
+  "https://<NODE_HOST>:8006/api2/json/nodes/<NODE_NAME>/qemu/<VMID>/resize"
+```
+
+- `disk` -- the disk name (e.g., `scsi0`, `virtio0`, `efidisk0`)
+- `size` -- prefix with `+` to grow by that amount (e.g., `+10G`), or specify absolute size (e.g., `50G`)
+- **Disks can only be grown, never shrunk**
+- Disk resize can be performed while the VM is running (hot-resize)
+- The guest OS must expand its filesystem to use the new space (e.g., `growpart` + `resize2fs`, or cloud-init will handle it on reboot for cloud images)
+
+### Task Polling
+
+Many operations (clone, migrate, backup) return a task UPID rather than completing synchronously. Poll for completion:
+
+```bash
+curl -sk \
+  -H "Authorization: PVEAPIToken=$(pass show <PASS_PATH> | head -1)=$(pass show <PASS_PATH> | tail -1)" \
+  "https://<NODE_HOST>:8006/api2/json/nodes/<NODE_NAME>/tasks/<UPID>/status" \
+  | jq '{status: .data.status, exitstatus: .data.exitstatus}'
+```
+
+- `status == "running"` -- task still in progress
+- `status == "stopped"` and `exitstatus == "OK"` -- task completed successfully
+- `status == "stopped"` and `exitstatus != "OK"` -- task failed; check `.data.exitstatus` for details
+
+Read task logs for debugging:
+
+```bash
+curl -sk \
+  -H "Authorization: PVEAPIToken=$(pass show <PASS_PATH> | head -1)=$(pass show <PASS_PATH> | tail -1)" \
+  "https://<NODE_HOST>:8006/api2/json/nodes/<NODE_NAME>/tasks/<UPID>/log?limit=50" \
+  | jq '.data[] | .t'
+```
 
 ## RBAC Bootstrap
 
