@@ -1,0 +1,45 @@
+# Proxmox cluster topology and conventions.
+# The proxmox-manager skill reads this file at invocation
+# to ground all operations in this environment.
+
+cluster:
+  name: annarchy.net
+  nodes:
+    - name: pve01
+      host: pve01.annarchy.net
+    - name: pve02
+      host: pve02.annarchy.net
+    - name: pve03
+      host: pve03.annarchy.net
+
+defaults:
+  storage: local-lvm
+  network_bridge: vmbr0
+  bios: ovmf
+  machine: q35
+  cpu: host
+  scsi_controller: virtio-scsi-single
+  efidisk_pre_enrolled_keys: false
+  guest_agent: true
+
+vmid_ranges:
+  templates: 100-999
+  vms: 1000-9999
+
+credentials:
+  pass_path: annarchy.net/pve/api-token
+  ssh_user: root
+
+tags:
+  templates: ["template"]
+  talos: ["talos", "kubernetes"]
+  cloudinit: ["cloudinit"]
+
+cloudinit:
+  default_user: ada
+  ssh_keys_source: ~/.ssh/authorized_keys
+  vendor_snippet_path: /var/lib/vz/snippets/
+
+ansible:
+  fleet_infra_path: ~/src/github.com/adamancini/fleet-infra
+  inventory: playbooks/inventories/annarchy.net/hosts.yaml
