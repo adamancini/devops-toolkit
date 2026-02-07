@@ -150,7 +150,7 @@ requires: [api, ssh]
 
 ## Notes
 
-- Cloud images are pre-configured for cloud-init and typically include the QEMU guest agent. No manual OS installation is needed.
+- Cloud images are pre-configured for cloud-init but may not include the QEMU guest agent. Ubuntu noble (24.04) does **not** ship `qemu-guest-agent` in its cloud image. To enable guest agent features (IP reporting, graceful shutdown, filesystem freeze), install it via a cloud-init vendor snippet or `runcmd`: `apt-get install -y qemu-guest-agent && systemctl enable --now qemu-guest-agent`.
 - The serial console configuration (`serial0 socket` + `vga serial0`) enables `qm terminal <vmid>` for debugging cloud-init issues without VNC.
 - To clone from this template, use `POST /nodes/<node>/qemu/<vmid>/clone` with `full=1` and supply cloud-init overrides (ciuser, sshkeys, ipconfig0) on the clone.
 - Common cloud images: Ubuntu (`noble-server-cloudimg-amd64.img`), Debian (`debian-12-generic-amd64.qcow2`), Fedora (`Fedora-Cloud-Base-*.qcow2`), Rocky (`Rocky-*-GenericCloud.qcow2`).

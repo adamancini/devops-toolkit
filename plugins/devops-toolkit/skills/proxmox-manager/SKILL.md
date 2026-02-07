@@ -98,7 +98,7 @@ Use the Proxmox REST API when possible. Fall back to SSH for operations that req
 | Method | Operations |
 |--------|-----------|
 | REST API | VM create, start, stop, resize, migrate, clone, status, snapshot, backup, cluster/node info, tag management, configuration changes |
-| SSH | Disk import (`qm importdisk`), template conversion (`qm template`), cloud image download (`wget`/`curl`), cloud-init snippet management, ISO uploads to node storage |
+| SSH | Disk import (`qm set --scsi0 <storage>:0,import-from=<path>`), template conversion (`qm template`), cloud image download (`wget`/`curl`), cloud-init snippet management, ISO uploads to node storage |
 
 ### API Connectivity Check
 
@@ -346,10 +346,10 @@ ssh <SSH_USER>@<NODE_HOST> 'pveum user add <PVE_USER>@pve'
 ssh <SSH_USER>@<NODE_HOST> 'pveum role add <ROLE_NAME> --privs \
   "VM.Allocate VM.Clone VM.Config.Disk VM.Config.CPU VM.Config.Memory \
    VM.Config.Network VM.Config.Options VM.Config.Cloudinit VM.Config.HWType \
-   VM.PowerMgmt VM.Console VM.Monitor VM.Migrate VM.Snapshot VM.Snapshot.Rollback \
-   VM.Backup VM.Audit \
+   VM.PowerMgmt VM.Console VM.Migrate VM.Snapshot VM.Snapshot.Rollback \
+   VM.Backup VM.Audit VM.GuestAgent.Audit \
    Datastore.Allocate Datastore.AllocateSpace Datastore.Audit \
-   Sys.Audit Sys.Console"'
+   SDN.Use Sys.Audit Sys.Console"'
 
 # 3. Assign permissions at cluster root
 ssh <SSH_USER>@<NODE_HOST> 'pveum acl modify / --user <PVE_USER>@pve --role <ROLE_NAME>'
