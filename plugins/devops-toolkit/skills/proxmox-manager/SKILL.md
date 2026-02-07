@@ -1,7 +1,7 @@
 ---
 name: proxmox-manager
 description: Use when the user asks to "create a proxmox VM", "make a VM template", "migrate VM", "check proxmox status", "evacuate node", "manage proxmox snapshots", "import cloud image", "spin up a cluster", "tear down cluster", "check node health", "list VMs", "clone template", "upload ISO", "manage proxmox storage", "create proxmox API token", "bootstrap proxmox credentials", or mentions Proxmox VE cluster operations, VM lifecycle management, template creation, node maintenance, or cluster provisioning.
-version: 0.3.0
+version: 0.4.0
 ---
 
 # Proxmox Manager Skill
@@ -117,6 +117,7 @@ Expected: `200`. If `401`, credentials are invalid. If `000`, node is unreachabl
 This section provides concrete API endpoints and examples for the most common operations. All examples use the placeholders defined in `cluster-config.yaml`:
 - `<PASS_PATH>` -- `credentials.pass_path`
 - `<NODE_HOST>` -- any `cluster.nodes[].host`
+- `<CLUSTER_DOMAIN>` -- the domain suffix from `cluster.nodes[].host` (e.g., `annarchy.net`); used in loop constructs where `$node` is a short name from the API
 - `<SSH_USER>` -- `credentials.ssh_user`
 
 ### Cluster & Node Status
@@ -333,6 +334,383 @@ curl -sk \
   "https://<NODE_HOST>:8006/api2/json/nodes/<NODE_NAME>/tasks/<UPID>/log?limit=50" \
   | jq '.data[] | .t'
 ```
+
+### Migration
+
+**Live migrate a running VM to another node:**
+
+```bash
+curl -sk -X POST \
+  -H "Authorization: PVEAPIToken=$(pass show <PASS_PATH> | head -1)=$(pass show <PASS_PATH> | tail -1)" \
+  -d "target=<TARGET_NODE>&online=1" \
+  "https://<NODE_HOST>:8006/api2/json/nodes/<SOURCE_NODE>/qemu/<VMID>/migrate"
+```
+
+Parameters:
+- `target` -- destination node name (e.g., `pve02`)
+- `online` -- `1` for live migration (VM stays running), `0` for offline migration
+
+Returns a task UPID. Poll with the task polling pattern until `status == "stopped"` and `exitstatus == "OK"`.
+
+**Offline migrate a stopped VM:**
+
+```bash
+curl -sk -X POST \
+  -H "Authorization: PVEAPIToken=$(pass show <PASS_PATH> | head -1)=$(pass show <PASS_PATH> | tail -1)" \
+  -d "target=<TARGET_NODE>&online=0" \
+  "https://<NODE_HOST>:8006/api2/json/nodes/<SOURCE_NODE>/qemu/<VMID>/migrate"
+```
+
+Use offline migration when:
+- The VM is stopped
+- The VM uses local storage that cannot be live-migrated
+- You need to move the disk data between storage backends
+
+**Pre-migration check -- verify target node has sufficient resources:**
+
+```bash
+curl -sk \
+  -H "Authorization: PVEAPIToken=$(pass show <PASS_PATH> | head -1)=$(pass show <PASS_PATH> | tail -1)" \
+  "https://<NODE_HOST>:8006/api2/json/nodes/<TARGET_NODE>/status" \
+  | jq '{cpu: .data.cpu, memory_free: ((.data.memory.total - .data.memory.used) / 1073741824 | floor | tostring + "G"), memory_total: (.data.memory.total / 1073741824 | floor | tostring + "G")}'
+```
+
+**Notes:**
+- Live migration requires shared storage or local-to-local migration support (PVE 7.2+)
+- With `local-lvm` storage, Proxmox performs storage migration automatically (copies disk data over the network)
+- Migration speed depends on VM memory size and disk dirty rate
+- For VMs with large memory footprints, consider setting a migration bandwidth limit via the `bwlimit` parameter (in KiB/s)
+
+### Bulk Tag Operations
+
+**List VMs filtered by tag:**
+
+```bash
+curl -sk \
+  -H "Authorization: PVEAPIToken=$(pass show <PASS_PATH> | head -1)=$(pass show <PASS_PATH> | tail -1)" \
+  "https://<NODE_HOST>:8006/api2/json/cluster/resources?type=vm" \
+  | jq '[.data[] | select(.tags // "" | split(";") | any(. == "<TAG>")) | {vmid, name, status, node, tags}]'
+```
+
+Tags in the API response are semicolon-delimited (e.g., `"template;cloudinit"`). Use `split(";")` for exact matching rather than `test()` to avoid partial matches (e.g., "k8s" matching "k8s-staging").
+
+**List VMs filtered by multiple tags (AND logic -- must have all tags):**
+
+```bash
+curl -sk \
+  -H "Authorization: PVEAPIToken=$(pass show <PASS_PATH> | head -1)=$(pass show <PASS_PATH> | tail -1)" \
+  "https://<NODE_HOST>:8006/api2/json/cluster/resources?type=vm" \
+  | jq '[.data[] | select((.tags // "" | split(";")) as $t | ("<TAG1>" | IN($t[])) and ("<TAG2>" | IN($t[]))) | {vmid, name, status, node, tags}]'
+```
+
+**Start all VMs matching a tag:**
+
+```bash
+# First, get the list of stopped VMs with the tag
+VMS=$(curl -sk \
+  -H "Authorization: PVEAPIToken=$(pass show <PASS_PATH> | head -1)=$(pass show <PASS_PATH> | tail -1)" \
+  "https://<NODE_HOST>:8006/api2/json/cluster/resources?type=vm" \
+  | jq -r '.data[] | select(.tags // "" | split(";") | any(. == "<TAG>")) | select(.status == "stopped") | "\(.node) \(.vmid)"')
+
+# Then start each VM
+echo "$VMS" | while read node vmid; do
+  [ -z "$node" ] && continue
+  echo "Starting VMID $vmid on $node..."
+  curl -sk -X POST \
+    -H "Authorization: PVEAPIToken=$(pass show <PASS_PATH> | head -1)=$(pass show <PASS_PATH> | tail -1)" \
+    "https://$node.<CLUSTER_DOMAIN>:8006/api2/json/nodes/$node/qemu/$vmid/status/start"
+done
+```
+
+**Shutdown all VMs matching a tag (graceful):**
+
+```bash
+VMS=$(curl -sk \
+  -H "Authorization: PVEAPIToken=$(pass show <PASS_PATH> | head -1)=$(pass show <PASS_PATH> | tail -1)" \
+  "https://<NODE_HOST>:8006/api2/json/cluster/resources?type=vm" \
+  | jq -r '.data[] | select(.tags // "" | split(";") | any(. == "<TAG>")) | select(.status == "running") | "\(.node) \(.vmid)"')
+
+echo "$VMS" | while read node vmid; do
+  [ -z "$node" ] && continue
+  echo "Shutting down VMID $vmid on $node..."
+  curl -sk -X POST \
+    -H "Authorization: PVEAPIToken=$(pass show <PASS_PATH> | head -1)=$(pass show <PASS_PATH> | tail -1)" \
+    "https://$node.<CLUSTER_DOMAIN>:8006/api2/json/nodes/$node/qemu/$vmid/status/shutdown"
+done
+```
+
+**Apply a tag to multiple VMs by VMID list:**
+
+```bash
+for vmid in <VMID1> <VMID2> <VMID3>; do
+  # Get current node and tags
+  INFO=$(curl -sk \
+    -H "Authorization: PVEAPIToken=$(pass show <PASS_PATH> | head -1)=$(pass show <PASS_PATH> | tail -1)" \
+    "https://<NODE_HOST>:8006/api2/json/cluster/resources?type=vm" \
+    | jq -r ".data[] | select(.vmid == $vmid) | \"\(.node) \(.tags // \"\")\"")
+  node=$(echo "$INFO" | awk '{print $1}')
+  existing_tags=$(echo "$INFO" | cut -d' ' -f2-)
+  # Append new tag (semicolon-separated for API)
+  if [ -n "$existing_tags" ]; then
+    new_tags="${existing_tags};<NEW_TAG>"
+  else
+    new_tags="<NEW_TAG>"
+  fi
+  curl -sk -X PUT \
+    -H "Authorization: PVEAPIToken=$(pass show <PASS_PATH> | head -1)=$(pass show <PASS_PATH> | tail -1)" \
+    -d "tags=$new_tags" \
+    "https://$node.<CLUSTER_DOMAIN>:8006/api2/json/nodes/$node/qemu/$vmid/config"
+done
+```
+
+**Remove a tag from all VMs that have it:**
+
+```bash
+VMS=$(curl -sk \
+  -H "Authorization: PVEAPIToken=$(pass show <PASS_PATH> | head -1)=$(pass show <PASS_PATH> | tail -1)" \
+  "https://<NODE_HOST>:8006/api2/json/cluster/resources?type=vm" \
+  | jq -r '.data[] | select(.tags // "" | split(";") | any(. == "<TAG>")) | "\(.node) \(.vmid) \(.tags)"')
+
+echo "$VMS" | while read node vmid tags; do
+  [ -z "$node" ] && continue
+  new_tags=$(echo "$tags" | tr ';' '\n' | grep -v "^<TAG>$" | paste -sd ';' -)
+  curl -sk -X PUT \
+    -H "Authorization: PVEAPIToken=$(pass show <PASS_PATH> | head -1)=$(pass show <PASS_PATH> | tail -1)" \
+    -d "tags=$new_tags" \
+    "https://$node.<CLUSTER_DOMAIN>:8006/api2/json/nodes/$node/qemu/$vmid/config"
+done
+```
+
+**Notes:**
+- Always preview the affected VMs before executing bulk operations (dry-run first)
+- For destructive bulk operations (stop, delete), confirm with the user and list all affected VMs by name and VMID
+- The `<NODE_HOST>` in bulk queries should target any cluster node -- `cluster/resources` returns cluster-wide data regardless of which node you query
+
+### Snapshot Management
+
+**Create a snapshot:**
+
+```bash
+curl -sk -X POST \
+  -H "Authorization: PVEAPIToken=$(pass show <PASS_PATH> | head -1)=$(pass show <PASS_PATH> | tail -1)" \
+  -d "snapname=<SNAP_NAME>&description=<DESCRIPTION>&vmstate=0" \
+  "https://<NODE_HOST>:8006/api2/json/nodes/<NODE_NAME>/qemu/<VMID>/snapshot"
+```
+
+Parameters:
+- `snapname` -- snapshot identifier (alphanumeric, hyphens, underscores; no spaces)
+- `description` -- human-readable description (URL-encode if it contains special characters)
+- `vmstate` -- `1` to include RAM state (live snapshot), `0` for disk-only snapshot
+
+Returns a task UPID. Disk-only snapshots are near-instant on LVM-thin. RAM snapshots take longer and briefly pause the VM.
+
+**List all snapshots for a VM:**
+
+```bash
+curl -sk \
+  -H "Authorization: PVEAPIToken=$(pass show <PASS_PATH> | head -1)=$(pass show <PASS_PATH> | tail -1)" \
+  "https://<NODE_HOST>:8006/api2/json/nodes/<NODE_NAME>/qemu/<VMID>/snapshot" \
+  | jq '.data[] | select(.name != "current") | {name, description, snaptime: (.snaptime | todate), vmstate}'
+```
+
+The `current` entry represents the live state and should be filtered out. `snaptime` is a Unix timestamp.
+
+**Rollback to a snapshot:**
+
+```bash
+curl -sk -X POST \
+  -H "Authorization: PVEAPIToken=$(pass show <PASS_PATH> | head -1)=$(pass show <PASS_PATH> | tail -1)" \
+  "https://<NODE_HOST>:8006/api2/json/nodes/<NODE_NAME>/qemu/<VMID>/snapshot/<SNAP_NAME>/rollback"
+```
+
+**IMPORTANT:** Rollback is destructive -- all changes since the snapshot are lost. The VM must be stopped before rollback (unless the snapshot includes RAM state). Always confirm with the user before executing.
+
+Returns a task UPID. Poll for completion.
+
+**Delete a snapshot:**
+
+```bash
+curl -sk -X DELETE \
+  -H "Authorization: PVEAPIToken=$(pass show <PASS_PATH> | head -1)=$(pass show <PASS_PATH> | tail -1)" \
+  "https://<NODE_HOST>:8006/api2/json/nodes/<NODE_NAME>/qemu/<VMID>/snapshot/<SNAP_NAME>"
+```
+
+Returns a task UPID. Snapshot deletion merges the snapshot data back into the parent, which may take time for large snapshots.
+
+**Notes:**
+- Snapshots on LVM-thin (`local-lvm`) are thin-provisioned and space-efficient
+- Avoid long snapshot chains (>3-4 deep) -- they degrade I/O performance and complicate merges
+- Snapshots are not backups -- they live on the same storage as the VM. Use vzdump for true backups
+- For consistent snapshots of running VMs, the QEMU guest agent enables filesystem freeze/thaw (`fsfreeze-freeze` / `fsfreeze-thaw`) automatically during the snapshot operation
+
+### Backup Management
+
+**Trigger an on-demand backup (vzdump):**
+
+```bash
+curl -sk -X POST \
+  -H "Authorization: PVEAPIToken=$(pass show <PASS_PATH> | head -1)=$(pass show <PASS_PATH> | tail -1)" \
+  -d "vmid=<VMID>&storage=<BACKUP_STORAGE>&mode=snapshot&compress=zstd&notes-template={{name}}-{{node}}-manual" \
+  "https://<NODE_HOST>:8006/api2/json/nodes/<NODE_NAME>/vzdump"
+```
+
+Parameters:
+- `vmid` -- VMID to back up (can be a comma-separated list for multiple VMs)
+- `storage` -- target storage for the backup file (must support `content: backup`)
+- `mode` -- `snapshot` (online, uses QEMU snapshot), `suspend` (brief pause), or `stop` (shuts down VM during backup)
+- `compress` -- `zstd` (recommended), `gzip`, `lzo`, or `0` for none
+- `notes-template` -- template for backup notes; supports `{{name}}`, `{{node}}`, `{{vmid}}`, `{{guestname}}`
+
+Returns a task UPID. Backup duration depends on disk size and compression.
+
+**List backups in storage:**
+
+```bash
+curl -sk \
+  -H "Authorization: PVEAPIToken=$(pass show <PASS_PATH> | head -1)=$(pass show <PASS_PATH> | tail -1)" \
+  "https://<NODE_HOST>:8006/api2/json/nodes/<NODE_NAME>/storage/<STORAGE>/content?content=backup" \
+  | jq '.data[] | {volid, vmid, size: (.size / 1073741824 * 100 | floor / 100 | tostring + "G"), ctime: (.ctime | todate), notes}'
+```
+
+**List scheduled backup jobs:**
+
+```bash
+curl -sk \
+  -H "Authorization: PVEAPIToken=$(pass show <PASS_PATH> | head -1)=$(pass show <PASS_PATH> | tail -1)" \
+  "https://<NODE_HOST>:8006/api2/json/cluster/backup" \
+  | jq '.data[] | {id, schedule, vmid, storage, mode, compress, enabled}'
+```
+
+**Restore a VM from backup:**
+
+```bash
+curl -sk -X POST \
+  -H "Authorization: PVEAPIToken=$(pass show <PASS_PATH> | head -1)=$(pass show <PASS_PATH> | tail -1)" \
+  -d "vmid=<NEW_VMID>&archive=<VOLID>&storage=<STORAGE>&unique=1" \
+  "https://<NODE_HOST>:8006/api2/json/nodes/<NODE_NAME>/qemu"
+```
+
+Parameters:
+- `vmid` -- VMID for the restored VM (allocate from `vmid_ranges.vms`)
+- `archive` -- the backup volume ID from the storage listing (e.g., `local:backup/vzdump-qemu-1000-2026_02_07-12_00_00.vma.zst`)
+- `storage` -- target storage for the restored disks
+- `unique` -- `1` to regenerate unique properties (MAC addresses, etc.) to avoid conflicts
+
+Returns a task UPID. Restore duration depends on backup size.
+
+**Delete a backup:**
+
+```bash
+curl -sk -X DELETE \
+  -H "Authorization: PVEAPIToken=$(pass show <PASS_PATH> | head -1)=$(pass show <PASS_PATH> | tail -1)" \
+  "https://<NODE_HOST>:8006/api2/json/nodes/<NODE_NAME>/storage/<STORAGE>/content/<VOLID>"
+```
+
+Replace `<VOLID>` with the full volume ID (URL-encode the path separators if needed).
+
+**Notes:**
+- Backups are full copies stored separately from the VM -- unlike snapshots, they survive storage failure
+- `snapshot` mode is preferred for online VMs -- it uses QEMU's snapshot capability with minimal downtime
+- With guest agent enabled, filesystem freeze is automatic during snapshot-mode backups
+- `zstd` compression offers the best speed-to-ratio tradeoff for modern hardware
+- Backup storage must have `content: backup` enabled in its Proxmox storage configuration
+
+### Storage Management
+
+**List all storage pools on a node:**
+
+```bash
+curl -sk \
+  -H "Authorization: PVEAPIToken=$(pass show <PASS_PATH> | head -1)=$(pass show <PASS_PATH> | tail -1)" \
+  "https://<NODE_HOST>:8006/api2/json/nodes/<NODE_NAME>/storage" \
+  | jq '.data[] | {storage: .storage, type: .type, content: .content, active: .active, avail: (.avail / 1073741824 * 100 | floor / 100 | tostring + "G"), total: (.total / 1073741824 * 100 | floor / 100 | tostring + "G"), used_fraction: (.used_fraction * 100 | floor | tostring + "%")}'
+```
+
+**Cluster-wide storage overview:**
+
+```bash
+curl -sk \
+  -H "Authorization: PVEAPIToken=$(pass show <PASS_PATH> | head -1)=$(pass show <PASS_PATH> | tail -1)" \
+  "https://<NODE_HOST>:8006/api2/json/cluster/resources?type=storage" \
+  | jq '.data[] | {storage: .storage, node: .node, status: .status, avail: (.maxdisk - .disk) / 1073741824 * 100 | floor / 100, total_gb: (.maxdisk / 1073741824 * 100 | floor / 100), used_pct: (.disk / .maxdisk * 100 | floor)}'
+```
+
+**List ISOs in node storage:**
+
+```bash
+curl -sk \
+  -H "Authorization: PVEAPIToken=$(pass show <PASS_PATH> | head -1)=$(pass show <PASS_PATH> | tail -1)" \
+  "https://<NODE_HOST>:8006/api2/json/nodes/<NODE_NAME>/storage/local/content?content=iso" \
+  | jq '.data[] | {volid, size: (.size / 1073741824 * 100 | floor / 100 | tostring + "G"), ctime: (.ctime | todate)}'
+```
+
+**List VM disk images in storage:**
+
+```bash
+curl -sk \
+  -H "Authorization: PVEAPIToken=$(pass show <PASS_PATH> | head -1)=$(pass show <PASS_PATH> | tail -1)" \
+  "https://<NODE_HOST>:8006/api2/json/nodes/<NODE_NAME>/storage/<STORAGE>/content?content=images" \
+  | jq '.data[] | {volid, vmid, size: (.size / 1073741824 * 100 | floor / 100 | tostring + "G"), format}'
+```
+
+**Upload an ISO to node storage** (SSH -- the API upload endpoint requires multipart form which is cumbersome from curl):
+
+```bash
+ssh <SSH_USER>@<NODE_HOST> 'wget -q -O /var/lib/vz/template/iso/<FILENAME>.iso <ISO_URL>'
+```
+
+For local files, use `scp`:
+
+```bash
+scp <LOCAL_ISO_PATH> <SSH_USER>@<NODE_HOST>:/var/lib/vz/template/iso/<FILENAME>.iso
+```
+
+After upload, verify:
+
+```bash
+curl -sk \
+  -H "Authorization: PVEAPIToken=$(pass show <PASS_PATH> | head -1)=$(pass show <PASS_PATH> | tail -1)" \
+  "https://<NODE_HOST>:8006/api2/json/nodes/<NODE_NAME>/storage/local/content?content=iso" \
+  | jq '.data[] | select(.volid | test("<FILENAME>"))'
+```
+
+**Identify orphaned (unused) disks:**
+
+Orphaned disks appear as `unused0`, `unused1`, etc. in VM configs, or as disk images in storage not referenced by any VM.
+
+```bash
+# Check for unused disks in VM configs across the cluster
+curl -sk \
+  -H "Authorization: PVEAPIToken=$(pass show <PASS_PATH> | head -1)=$(pass show <PASS_PATH> | tail -1)" \
+  "https://<NODE_HOST>:8006/api2/json/cluster/resources?type=vm" \
+  | jq -r '.data[] | select(.template != 1) | "\(.node) \(.vmid)"' \
+  | while read node vmid; do
+    unused=$(curl -sk \
+      -H "Authorization: PVEAPIToken=$(pass show <PASS_PATH> | head -1)=$(pass show <PASS_PATH> | tail -1)" \
+      "https://$node.<CLUSTER_DOMAIN>:8006/api2/json/nodes/$node/qemu/$vmid/config" \
+      | jq -r '.data | to_entries[] | select(.key | startswith("unused")) | "\(.key): \(.value)"')
+    if [ -n "$unused" ]; then
+      echo "VMID $vmid ($node): $unused"
+    fi
+  done
+```
+
+**Remove an unused disk from a VM:**
+
+```bash
+curl -sk -X PUT \
+  -H "Authorization: PVEAPIToken=$(pass show <PASS_PATH> | head -1)=$(pass show <PASS_PATH> | tail -1)" \
+  -d "delete=unused0" \
+  "https://<NODE_HOST>:8006/api2/json/nodes/<NODE_NAME>/qemu/<VMID>/config"
+```
+
+This deletes the `unused0` disk entry and the underlying disk image. Adjust the index (`unused0`, `unused1`, etc.) as needed.
+
+**Notes:**
+- `local` storage holds ISOs and container templates (`/var/lib/vz/template/`)
+- `local-lvm` is the default thin-provisioned storage for VM disks
+- Storage usage reporting may show thin-provisioned usage (allocated vs actually written)
+- Before cleaning up orphaned disks, verify they are not referenced by snapshots
 
 ## RBAC Bootstrap
 
