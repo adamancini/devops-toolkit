@@ -1,0 +1,58 @@
+# Cluster profile: talos-staging
+# Talos Kubernetes staging cluster on the annarchy.net Proxmox cluster.
+
+name: talos-staging
+type: talos
+
+talos:
+  version: "1.9"
+  config_dir: ~/src/github.com/adamancini/fleet-infra/talos/staging
+
+network:
+  api_endpoint: 10.0.0.30
+  pod_cidr: 10.244.0.0/16
+  service_cidr: 10.96.0.0/12
+
+nodes:
+  controlplane:
+    count: 3
+    name_prefix: k0s
+    cores: 4
+    memory: 8192
+    disk: 100G
+    start_vmid: 1031
+    placement: spread
+    assignments:
+      - name: k0s01
+        node: pve01
+        vmid: 1031
+        ip: 10.0.0.31
+      - name: k0s02
+        node: pve02
+        vmid: 1032
+        ip: 10.0.0.32
+      - name: k0s03
+        node: pve03
+        vmid: 1033
+        ip: 10.0.0.33
+  workers:
+    count: 0
+    name_prefix: k0w
+    cores: 4
+    memory: 8192
+    disk: 100G
+    start_vmid: 1041
+    placement: spread
+    assignments: []
+
+template: 101
+
+tags:
+  - talos
+  - kubernetes
+  - staging
+
+flux:
+  repo: git@github.com:adamancini/fleet-infra.git
+  path: clusters/staging
+  branch: main

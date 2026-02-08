@@ -1,7 +1,7 @@
 ---
 name: proxmox-manager
 description: Use when the user asks to "create a proxmox VM", "make a VM template", "migrate VM", "check proxmox status", "evacuate node", "manage proxmox snapshots", "import cloud image", "spin up a cluster", "tear down cluster", "check node health", "list VMs", "clone template", "upload ISO", "manage proxmox storage", "create proxmox API token", "bootstrap proxmox credentials", or mentions Proxmox VE cluster operations, VM lifecycle management, template creation, node maintenance, or cluster provisioning.
-version: 0.4.0
+version: 0.5.0
 ---
 
 # Proxmox Manager Skill
@@ -712,6 +712,62 @@ This deletes the `unused0` disk entry and the underlying disk image. Adjust the 
 - Storage usage reporting may show thin-provisioned usage (allocated vs actually written)
 - Before cleaning up orphaned disks, verify they are not referenced by snapshots
 
+### Cluster Lifecycle Operations
+
+Cluster lifecycle operations use cluster profiles (defined in `skills/proxmox-manager/clusters/`) to create, query, and destroy entire clusters as a unit. All operations filter VMs by the profile's tag list using AND logic.
+
+**List cluster profiles:**
+
+Read all `.yaml` files in the `clusters/` directory to see available profiles:
+
+```bash
+ls skills/proxmox-manager/clusters/*.yaml
+```
+
+**Cluster status -- list VMs belonging to a cluster:**
+
+Query all VMs whose tags match every tag in the profile (AND logic). This returns only VMs that are members of the specified cluster:
+
+```bash
+curl -sk \
+  -H "Authorization: PVEAPIToken=$(pass show <PASS_PATH> | head -1)=$(pass show <PASS_PATH> | tail -1)" \
+  "https://<NODE_HOST>:8006/api2/json/cluster/resources?type=vm" \
+  | jq '[.data[] | select(.template != 1) | select((.tags // "" | split(";")) as $t | ("talos" | IN($t[])) and ("kubernetes" | IN($t[])) and ("staging" | IN($t[]))) | {vmid, name, status, node, tags}]'
+```
+
+Replace the tag literals with the profile's `tags` list. The `select(.template != 1)` filter excludes templates from cluster membership queries.
+
+**Cluster create:**
+
+Full cluster provisioning is a multi-step procedure documented in `runbooks/cluster-create.md`. Summary:
+
+1. Read the cluster profile
+2. Allocate VMIDs (auto or from explicit assignments)
+3. Clone VMs from the template
+4. Configure each VM (CPU, memory, disk, tags)
+5. Start all VMs
+6. Bootstrap Talos (if `type: talos`) -- generate configs, apply, bootstrap
+7. Bootstrap Flux CD (if `flux` section present)
+
+See the runbook for full API commands, task polling, and verification steps.
+
+**Cluster teardown:**
+
+Cluster teardown destroys all VMs matching the profile's tags. Documented in `runbooks/cluster-teardown.md`. Summary:
+
+1. Read the cluster profile
+2. List all VMs matching the profile's tags (AND logic)
+3. Confirm the destruction plan with the user
+4. Gracefully shut down running VMs (force-stop after timeout)
+5. Delete all VMs with `purge=1&destroy-unreferenced-disks=1`
+6. Verify no VMs remain with those tags
+
+See the runbook for full API commands and safety checks.
+
+**Cluster rebuild:**
+
+A rebuild is a compound operation: teardown followed by create. There is no separate runbook -- execute `cluster-teardown.md` then `cluster-create.md` using the same profile. This is the standard workflow for reprovisioning a cluster from scratch (e.g., after a Talos version upgrade or configuration change).
+
 ## RBAC Bootstrap
 
 If credentials do not exist in `pass` (first-time setup), walk the user through this bootstrap procedure. **This requires SSH access to one Proxmox node.** Substitute `<SSH_USER>`, `<NODE_HOST>`, and `<PASS_PATH>` from `cluster-config.yaml`. Choose a PVE username, role name, and token name appropriate for the deployment.
@@ -777,13 +833,99 @@ When the user provides a URL or raw instructions for a new procedure:
 
 ## Cluster Profiles
 
-Cluster profiles live in `skills/proxmox-manager/clusters/`. Each profile defines an entire cluster as a unit for fast create/destroy cycles. See the design document for the profile format.
+Cluster profiles live in `skills/proxmox-manager/clusters/`. Each profile defines an entire cluster -- its nodes, sizing, network, template, tags, and optional bootstrap configuration -- as a single YAML file. Profiles enable repeatable create/destroy cycles: read the profile, provision VMs to match, tear them down when done.
+
+### Profile Schema
+
+```yaml
+# Required: unique cluster name (must match the filename without extension)
+name: my-cluster
+# Required: cluster type -- determines bootstrap behavior
+# "talos" enables Talos + Flux bootstrap; "generic" skips bootstrap steps
+type: talos | generic
+
+# Talos-specific configuration (required when type: talos)
+talos:
+  version: "1.9"                    # Talos release version
+  config_dir: /path/to/talos/config # Directory for generated machine configs
+
+# Network configuration
+network:
+  api_endpoint: 10.0.0.30           # Kubernetes API VIP or first CP address
+  pod_cidr: 10.244.0.0/16           # Pod network CIDR
+  service_cidr: 10.96.0.0/12        # Service network CIDR
+
+# Node groups
+nodes:
+  controlplane:
+    count: 3                         # Number of control plane nodes
+    name_prefix: k0s                 # Hostname prefix (suffixed with 01, 02, ...)
+    cores: 4                         # vCPU cores per node
+    memory: 8192                     # Memory in MB per node
+    disk: 100G                       # Root disk size per node
+    start_vmid: 1031                 # First VMID (auto-increment for remaining)
+    placement: spread | pack         # Placement strategy across hypervisors
+    assignments:                     # Explicit per-node assignments (optional)
+      - name: k0s01
+        node: pve01                  # Target Proxmox node
+        vmid: 1031                   # Explicit VMID
+        ip: 10.0.0.31               # Static IP address
+  workers:
+    count: 0                         # Number of worker nodes (0 = none)
+    name_prefix: k0w
+    cores: 4
+    memory: 8192
+    disk: 100G
+    start_vmid: 1041
+    placement: spread
+    assignments: []                  # Empty when count is 0
+
+# VM template VMID to clone from (must exist in the cluster)
+template: 101
+
+# Tags applied to every VM in this cluster
+tags:
+  - talos
+  - kubernetes
+  - staging
+
+# Flux CD configuration (optional; used when type: talos)
+flux:
+  repo: git@github.com:user/fleet-infra.git  # Git repository URL
+  path: clusters/staging                       # Path within the repo
+  branch: main                                 # Branch to reconcile
+```
+
+### Profile Conventions
+
+**Naming:** The YAML filename must match the `name` field (e.g., `talos-staging.yaml` for `name: talos-staging`).
+
+**Tags:** Every VM in the cluster receives the tags listed in the profile. During creation, role-specific tags (`controlplane` or `worker`) are appended automatically. Tags are the primary mechanism for identifying cluster membership -- teardown and status queries filter by tag.
+
+**Placement strategies:**
+- `spread` -- distribute VMs across hypervisor nodes round-robin to maximize fault tolerance. Preferred for production and staging clusters.
+- `pack` -- place VMs on the fewest nodes possible to conserve resources. Useful for dev/test clusters on constrained hardware.
+
+**VMID allocation:**
+- When `assignments` are provided, use the explicit VMIDs.
+- When `assignments` are empty, auto-allocate starting from `start_vmid` and incrementing by 1. Verify each VMID is unused before allocation.
+- VMIDs must fall within `vmid_ranges.vms` from `cluster-config.yaml`.
+
+**Template requirements:** The `template` VMID must reference an existing template in the cluster. For Talos clusters, this is typically a Talos OS cloud image converted to a template. The template must be accessible from all target nodes (either on shared storage or cloned to each node).
+
+**Isolation rules:**
+- Clusters must use non-overlapping VMID ranges to avoid conflicts.
+- Each cluster should have at least one unique tag (typically matching the cluster name) to enable unambiguous tag-based queries.
+- Flux paths must be distinct per cluster to prevent reconciliation conflicts (e.g., `clusters/staging/` vs `clusters/production/`).
+- Network CIDRs (`pod_cidr`, `service_cidr`) must not overlap between clusters sharing the same L2 network.
 
 ## Ansible Integration
 
-For multi-node orchestration, delegate to existing Ansible playbooks. The repository path and inventory are defined in the `ansible` section of `cluster-config.yaml`.
+For multi-node orchestration, delegate to existing Ansible playbooks in the fleet-infra repository. The repository path and inventory are defined in the `ansible` section of `cluster-config.yaml`. The skill does **not** modify Ansible playbooks or inventory files -- it is a consumer of existing automation, not an editor.
 
-Construct delegation commands using those paths:
+### General Delegation Pattern
+
+Construct delegation commands using paths from `cluster-config.yaml`:
 
 ```bash
 ansible-playbook \
@@ -793,7 +935,86 @@ ansible-playbook \
 
 Where `<FLEET_INFRA_PATH>` is `ansible.fleet_infra_path` and `<INVENTORY>` is `ansible.inventory` from `cluster-config.yaml`.
 
-The skill does **not** modify Ansible playbooks or inventory files. It is a consumer of existing automation, not an editor.
+### Available Playbooks
+
+| Playbook | Purpose | Tags |
+|----------|---------|------|
+| `talos-provision-vms.yaml` | Provision Talos VMs via Proxmox API (clone, configure, start) | `controlplane`, `workers` |
+| `reboot-vms.yaml` | Rolling reboot of VMs by group | -- |
+| `pve-servers.yaml` | Proxmox host configuration and maintenance | -- |
+| `ping.yaml` | Connectivity check for all hosts in inventory | -- |
+
+### Talos Cluster Provisioning via Ansible
+
+For standard Talos cluster topologies that match the existing playbook, Ansible delegation is the preferred approach. The playbook handles VM cloning, configuration, and startup in a single run.
+
+**Extract Proxmox API token for Ansible** (required as an environment variable):
+
+```bash
+PROXMOX_API_TOKEN="$(pass show <PASS_PATH> | head -1)=$(pass show <PASS_PATH> | tail -1)"
+```
+
+**Full cluster provisioning (control plane + workers):**
+
+```bash
+PROXMOX_API_TOKEN="$(pass show <PASS_PATH> | head -1)=$(pass show <PASS_PATH> | tail -1)" \
+  ansible-playbook \
+  -i <FLEET_INFRA_PATH>/<INVENTORY> \
+  <FLEET_INFRA_PATH>/playbooks/talos-provision-vms.yaml
+```
+
+**Control plane only:**
+
+```bash
+PROXMOX_API_TOKEN="$(pass show <PASS_PATH> | head -1)=$(pass show <PASS_PATH> | tail -1)" \
+  ansible-playbook \
+  -i <FLEET_INFRA_PATH>/<INVENTORY> \
+  <FLEET_INFRA_PATH>/playbooks/talos-provision-vms.yaml \
+  --tags controlplane
+```
+
+**Workers only:**
+
+```bash
+PROXMOX_API_TOKEN="$(pass show <PASS_PATH> | head -1)=$(pass show <PASS_PATH> | tail -1)" \
+  ansible-playbook \
+  -i <FLEET_INFRA_PATH>/<INVENTORY> \
+  <FLEET_INFRA_PATH>/playbooks/talos-provision-vms.yaml \
+  --tags workers
+```
+
+### When to Use Ansible vs Direct API
+
+| Use Ansible when... | Use direct API when... |
+|----------------------|------------------------|
+| The topology matches the existing playbook | The cluster profile has custom placement or sizing |
+| You want a single command for the full lifecycle | You need step-by-step control with verification |
+| The inventory already defines the target hosts | You're working with a new profile not in inventory |
+| Rolling operations across many nodes (reboots, updates) | Single-VM operations (resize, snapshot, migrate) |
+
+Ansible and cluster profiles serve complementary roles: Ansible playbooks encode a fixed workflow for a known topology, while cluster profiles are a declarative format that the skill interprets step-by-step via the API. For clusters defined in both, either approach works -- use Ansible for speed, direct API for flexibility.
+
+### Fleet-Wide Operations
+
+Target specific hosts or groups using `--limit`:
+
+```bash
+ansible-playbook \
+  -i <FLEET_INFRA_PATH>/<INVENTORY> \
+  <FLEET_INFRA_PATH>/playbooks/<playbook>.yaml \
+  --limit <PATTERN>
+```
+
+Common host patterns:
+
+| Pattern | Matches |
+|---------|---------|
+| `controlplane` | All control plane nodes |
+| `workers` | All worker nodes |
+| `pve01` | Single Proxmox host |
+| `pve*` | All Proxmox hosts |
+| `k0s01,k0s02` | Specific nodes by name |
+| `all:!workers` | Everything except workers |
 
 ## Troubleshooting
 
