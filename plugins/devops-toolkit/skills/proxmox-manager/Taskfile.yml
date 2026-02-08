@@ -1,0 +1,682 @@
+version: '3'
+
+vars:
+  PVE_AUTH: 'PVEAPIToken=$(pass show annarchy.net/pve/api-token | head -1)=$(pass show annarchy.net/pve/api-token | tail -1)'
+  PVE_NODE: '{{.PVE_NODE | default "pve01"}}'
+  PVE_HOST: '{{.PVE_NODE}}.annarchy.net'
+  PVE_API: 'https://{{.PVE_HOST}}:8006/api2/json'
+  STORAGE: '{{.STORAGE | default "local-lvm"}}'
+  DOMAIN: annarchy.net
+  SKILL_DIR:
+    sh: 'dirname "{{.TASKFILE}}"'
+
+tasks:
+  default:
+    desc: List all available tasks
+    silent: true
+    cmds:
+      - task --list
+
+  pve:check:
+    desc: Verify API connectivity to all cluster nodes
+    silent: true
+    cmds:
+      - |
+        for node in pve01 pve02 pve03; do
+          code=$(curl -sk -o /dev/null -w "%{http_code}" \
+            -H "Authorization: {{.PVE_AUTH}}" \
+            "https://$node.{{.DOMAIN}}:8006/api2/json/version")
+          printf "%-8s %s\n" "$node" "$code"
+        done
+
+  # ---------------------------------------------------------------------------
+  # Status
+  # ---------------------------------------------------------------------------
+
+  pve:status:
+    desc: Show cluster health (nodes, online status, quorum)
+    silent: true
+    cmds:
+      - |
+        curl -sk \
+          -H "Authorization: {{.PVE_AUTH}}" \
+          "{{.PVE_API}}/cluster/status" \
+          | jq -r '
+            ["NAME","TYPE","ONLINE"],
+            ["----","----","------"],
+            (.data[] | [.name, .type, (.online // "" | tostring)]) | @tsv' \
+          | column -t
+
+  pve:status:node:
+    desc: Show per-node resource usage
+    silent: true
+    requires:
+      vars: [NODE]
+    cmds:
+      - |
+        curl -sk \
+          -H "Authorization: {{.PVE_AUTH}}" \
+          "https://{{.NODE}}.{{.DOMAIN}}:8006/api2/json/nodes/{{.NODE}}/status" \
+          | jq '{
+              cpu_pct: (.data.cpu * 100 | floor | tostring + "%"),
+              memory_used_gb: (.data.memory.used / 1073741824 * 10 | floor / 10 | tostring + "G"),
+              memory_total_gb: (.data.memory.total / 1073741824 * 10 | floor / 10 | tostring + "G"),
+              uptime_hours: (.data.uptime / 3600 | floor)
+            }'
+
+  pve:vms:
+    desc: List all VMs across the cluster (tabular)
+    silent: true
+    cmds:
+      - |
+        curl -sk \
+          -H "Authorization: {{.PVE_AUTH}}" \
+          "{{.PVE_API}}/cluster/resources?type=vm" \
+          | jq -r '
+            ["VMID","NAME","STATUS","NODE","MEM","TAGS"],
+            ["----","----","------","----","---","----"],
+            (.data | sort_by(.vmid)[] | select(.template != 1) |
+              [.vmid, .name, .status, .node,
+               (.maxmem / 1073741824 | floor | tostring + "G"),
+               (.tags // "-")]) | @tsv' \
+          | column -t
+
+  pve:vms:running:
+    desc: List running VMs only
+    silent: true
+    cmds:
+      - |
+        curl -sk \
+          -H "Authorization: {{.PVE_AUTH}}" \
+          "{{.PVE_API}}/cluster/resources?type=vm" \
+          | jq -r '
+            ["VMID","NAME","NODE","MEM","TAGS"],
+            ["----","----","----","---","----"],
+            (.data | sort_by(.vmid)[] | select(.status == "running") | select(.template != 1) |
+              [.vmid, .name, .node,
+               (.maxmem / 1073741824 | floor | tostring + "G"),
+               (.tags // "-")]) | @tsv' \
+          | column -t
+
+  pve:vms:by-tag:
+    desc: List VMs matching a tag
+    silent: true
+    requires:
+      vars: [TAG]
+    cmds:
+      - |
+        curl -sk \
+          -H "Authorization: {{.PVE_AUTH}}" \
+          "{{.PVE_API}}/cluster/resources?type=vm" \
+          | jq -r --arg tag "{{.TAG}}" '
+            ["VMID","NAME","STATUS","NODE","TAGS"],
+            ["----","----","------","----","----"],
+            (.data | sort_by(.vmid)[] | select(.template != 1) |
+              select(.tags // "" | split(";") | any(. == $tag)) |
+              [.vmid, .name, .status, .node, .tags]) | @tsv' \
+          | column -t
+
+  pve:templates:
+    desc: List VM templates
+    silent: true
+    cmds:
+      - |
+        curl -sk \
+          -H "Authorization: {{.PVE_AUTH}}" \
+          "{{.PVE_API}}/cluster/resources?type=vm" \
+          | jq -r '
+            ["VMID","NAME","NODE","TAGS"],
+            ["----","----","----","----"],
+            (.data | sort_by(.vmid)[] | select(.template == 1) |
+              [.vmid, .name, .node, (.tags // "-")]) | @tsv' \
+          | column -t
+
+  # ---------------------------------------------------------------------------
+  # VM Lifecycle
+  # ---------------------------------------------------------------------------
+
+  pve:vm:clone:
+    desc: Clone a template (always same-node; migrate after if needed)
+    silent: true
+    requires:
+      vars: [TEMPLATE, VMID, NAME]
+    cmds:
+      - |
+        # Resolve which node the template lives on
+        TMPL_NODE=$(curl -sk \
+          -H "Authorization: {{.PVE_AUTH}}" \
+          "{{.PVE_API}}/cluster/resources?type=vm" \
+          | jq -r '.data[] | select(.vmid == {{.TEMPLATE}}) | .node')
+        [ -z "$TMPL_NODE" ] || [ "$TMPL_NODE" = "null" ] && echo "Template {{.TEMPLATE}} not found" && exit 1
+
+        echo "Cloning template {{.TEMPLATE}} -> VMID {{.VMID}} ({{.NAME}}) on $TMPL_NODE..."
+        curl -sk -X POST \
+          -H "Authorization: {{.PVE_AUTH}}" \
+          -d "newid={{.VMID}}&name={{.NAME}}&full=1&storage={{.STORAGE}}" \
+          "https://$TMPL_NODE.{{.DOMAIN}}:8006/api2/json/nodes/$TMPL_NODE/qemu/{{.TEMPLATE}}/clone" \
+          | jq -r '.data // "ERROR: no task returned"'
+
+  pve:vm:start:
+    desc: Start a VM
+    silent: true
+    requires:
+      vars: [VMID]
+    cmds:
+      - |
+        VM_NODE=$(curl -sk \
+          -H "Authorization: {{.PVE_AUTH}}" \
+          "{{.PVE_API}}/cluster/resources?type=vm" \
+          | jq -r '.data[] | select(.vmid == {{.VMID}}) | .node')
+        [ -z "$VM_NODE" ] || [ "$VM_NODE" = "null" ] && echo "VMID {{.VMID}} not found" && exit 1
+
+        echo "Starting VMID {{.VMID}} on $VM_NODE..."
+        curl -sk -X POST \
+          -H "Authorization: {{.PVE_AUTH}}" \
+          "https://$VM_NODE.{{.DOMAIN}}:8006/api2/json/nodes/$VM_NODE/qemu/{{.VMID}}/status/start" \
+          | jq -r '.data // "ERROR: no task returned"'
+
+  pve:vm:stop:
+    desc: Graceful ACPI shutdown of a VM
+    silent: true
+    requires:
+      vars: [VMID]
+    cmds:
+      - |
+        VM_NODE=$(curl -sk \
+          -H "Authorization: {{.PVE_AUTH}}" \
+          "{{.PVE_API}}/cluster/resources?type=vm" \
+          | jq -r '.data[] | select(.vmid == {{.VMID}}) | .node')
+        [ -z "$VM_NODE" ] || [ "$VM_NODE" = "null" ] && echo "VMID {{.VMID}} not found" && exit 1
+
+        echo "Shutting down VMID {{.VMID}} on $VM_NODE (ACPI)..."
+        curl -sk -X POST \
+          -H "Authorization: {{.PVE_AUTH}}" \
+          "https://$VM_NODE.{{.DOMAIN}}:8006/api2/json/nodes/$VM_NODE/qemu/{{.VMID}}/status/shutdown" \
+          | jq -r '.data // "ERROR: no task returned"'
+
+  pve:vm:kill:
+    desc: Force-stop a VM (immediate power off)
+    silent: true
+    requires:
+      vars: [VMID]
+    prompt: "Force-stop VMID {{.VMID}}?"
+    cmds:
+      - |
+        VM_NODE=$(curl -sk \
+          -H "Authorization: {{.PVE_AUTH}}" \
+          "{{.PVE_API}}/cluster/resources?type=vm" \
+          | jq -r '.data[] | select(.vmid == {{.VMID}}) | .node')
+        [ -z "$VM_NODE" ] || [ "$VM_NODE" = "null" ] && echo "VMID {{.VMID}} not found" && exit 1
+
+        echo "Force-stopping VMID {{.VMID}} on $VM_NODE..."
+        curl -sk -X POST \
+          -H "Authorization: {{.PVE_AUTH}}" \
+          "https://$VM_NODE.{{.DOMAIN}}:8006/api2/json/nodes/$VM_NODE/qemu/{{.VMID}}/status/stop" \
+          | jq -r '.data // "ERROR: no task returned"'
+
+  pve:vm:delete:
+    desc: Delete a VM and all its disks (auto-stops if running)
+    silent: true
+    requires:
+      vars: [VMID]
+    prompt: "PERMANENTLY DELETE VMID {{.VMID}} and all its disks?"
+    cmds:
+      - |
+        VM_INFO=$(curl -sk \
+          -H "Authorization: {{.PVE_AUTH}}" \
+          "{{.PVE_API}}/cluster/resources?type=vm" \
+          | jq -r '.data[] | select(.vmid == {{.VMID}}) | "\(.node) \(.status)"')
+        VM_NODE=$(echo "$VM_INFO" | awk '{print $1}')
+        VM_STATUS=$(echo "$VM_INFO" | awk '{print $2}')
+        [ -z "$VM_NODE" ] || [ "$VM_NODE" = "null" ] && echo "VMID {{.VMID}} not found" && exit 1
+
+        # Auto-stop if running
+        if [ "$VM_STATUS" = "running" ]; then
+          echo "VM is running -- stopping first..."
+          curl -sk -X POST \
+            -H "Authorization: {{.PVE_AUTH}}" \
+            "https://$VM_NODE.{{.DOMAIN}}:8006/api2/json/nodes/$VM_NODE/qemu/{{.VMID}}/status/stop" > /dev/null
+          echo "Waiting for VM to stop..."
+          for i in $(seq 1 30); do
+            sleep 2
+            status=$(curl -sk \
+              -H "Authorization: {{.PVE_AUTH}}" \
+              "https://$VM_NODE.{{.DOMAIN}}:8006/api2/json/nodes/$VM_NODE/qemu/{{.VMID}}/status/current" \
+              | jq -r '.data.status')
+            [ "$status" = "stopped" ] && break
+          done
+        fi
+
+        echo "Deleting VMID {{.VMID}} on $VM_NODE..."
+        curl -sk -X DELETE \
+          -H "Authorization: {{.PVE_AUTH}}" \
+          "https://$VM_NODE.{{.DOMAIN}}:8006/api2/json/nodes/$VM_NODE/qemu/{{.VMID}}?purge=1&destroy-unreferenced-disks=1" \
+          | jq -r '.data // "ERROR: no task returned"'
+
+  pve:vm:resize:
+    desc: Grow a VM disk
+    silent: true
+    requires:
+      vars: [VMID, SIZE]
+    vars:
+      DISK: '{{.DISK | default "scsi0"}}'
+    cmds:
+      - |
+        VM_NODE=$(curl -sk \
+          -H "Authorization: {{.PVE_AUTH}}" \
+          "{{.PVE_API}}/cluster/resources?type=vm" \
+          | jq -r '.data[] | select(.vmid == {{.VMID}}) | .node')
+        [ -z "$VM_NODE" ] || [ "$VM_NODE" = "null" ] && echo "VMID {{.VMID}} not found" && exit 1
+
+        echo "Resizing VMID {{.VMID}} disk {{.DISK}} by {{.SIZE}} on $VM_NODE..."
+        curl -sk -X PUT \
+          -H "Authorization: {{.PVE_AUTH}}" \
+          -d "disk={{.DISK}}&size={{.SIZE}}" \
+          "https://$VM_NODE.{{.DOMAIN}}:8006/api2/json/nodes/$VM_NODE/qemu/{{.VMID}}/resize" \
+          | jq '.'
+
+  pve:vm:config:
+    desc: Show VM configuration
+    silent: true
+    requires:
+      vars: [VMID]
+    cmds:
+      - |
+        VM_NODE=$(curl -sk \
+          -H "Authorization: {{.PVE_AUTH}}" \
+          "{{.PVE_API}}/cluster/resources?type=vm" \
+          | jq -r '.data[] | select(.vmid == {{.VMID}}) | .node')
+        [ -z "$VM_NODE" ] || [ "$VM_NODE" = "null" ] && echo "VMID {{.VMID}} not found" && exit 1
+
+        curl -sk \
+          -H "Authorization: {{.PVE_AUTH}}" \
+          "https://$VM_NODE.{{.DOMAIN}}:8006/api2/json/nodes/$VM_NODE/qemu/{{.VMID}}/config" \
+          | jq '.data'
+
+  pve:vm:set:
+    desc: Set VM configuration (CORES, MEMORY, TAGS, IP)
+    silent: true
+    requires:
+      vars: [VMID]
+    cmds:
+      - |
+        VM_NODE=$(curl -sk \
+          -H "Authorization: {{.PVE_AUTH}}" \
+          "{{.PVE_API}}/cluster/resources?type=vm" \
+          | jq -r '.data[] | select(.vmid == {{.VMID}}) | .node')
+        [ -z "$VM_NODE" ] || [ "$VM_NODE" = "null" ] && echo "VMID {{.VMID}} not found" && exit 1
+
+        PARAMS=""
+        {{if .CORES}}PARAMS="${PARAMS}&cores={{.CORES}}"{{end}}
+        {{if .MEMORY}}PARAMS="${PARAMS}&memory={{.MEMORY}}"{{end}}
+        {{if .TAGS}}PARAMS="${PARAMS}&tags={{.TAGS}}"{{end}}
+        {{if .IP}}
+        # Derive gateway as .1 of the subnet
+        GW=$(echo "{{.IP}}" | sed 's|\.[0-9]*/|.1|')
+        PARAMS="${PARAMS}&ipconfig0=ip={{.IP}},gw=${GW}"
+        {{end}}
+
+        # Strip leading &
+        PARAMS="${PARAMS#&}"
+
+        if [ -z "$PARAMS" ]; then
+          echo "No configuration parameters specified. Use CORES, MEMORY, TAGS, or IP."
+          exit 1
+        fi
+
+        echo "Setting config on VMID {{.VMID}} ($VM_NODE): $PARAMS"
+        curl -sk -X PUT \
+          -H "Authorization: {{.PVE_AUTH}}" \
+          -d "$PARAMS" \
+          "https://$VM_NODE.{{.DOMAIN}}:8006/api2/json/nodes/$VM_NODE/qemu/{{.VMID}}/config" \
+          | jq '.'
+
+  pve:vm:migrate:
+    desc: Migrate a VM to another node
+    silent: true
+    requires:
+      vars: [VMID, TARGET]
+    vars:
+      ONLINE: '{{.ONLINE | default "0"}}'
+    cmds:
+      - |
+        VM_NODE=$(curl -sk \
+          -H "Authorization: {{.PVE_AUTH}}" \
+          "{{.PVE_API}}/cluster/resources?type=vm" \
+          | jq -r '.data[] | select(.vmid == {{.VMID}}) | .node')
+        [ -z "$VM_NODE" ] || [ "$VM_NODE" = "null" ] && echo "VMID {{.VMID}} not found" && exit 1
+
+        if [ "$VM_NODE" = "{{.TARGET}}" ]; then
+          echo "VMID {{.VMID}} is already on {{.TARGET}}"
+          exit 0
+        fi
+
+        echo "Migrating VMID {{.VMID}} from $VM_NODE -> {{.TARGET}} (online={{.ONLINE}})..."
+        curl -sk -X POST \
+          -H "Authorization: {{.PVE_AUTH}}" \
+          -d "target={{.TARGET}}&online={{.ONLINE}}" \
+          "https://$VM_NODE.{{.DOMAIN}}:8006/api2/json/nodes/$VM_NODE/qemu/{{.VMID}}/migrate" \
+          | jq -r '.data // "ERROR: no task returned"'
+
+  pve:task:wait:
+    desc: Poll a task UPID until completion
+    silent: true
+    requires:
+      vars: [UPID, NODE]
+    cmds:
+      - |
+        echo "Waiting for task on {{.NODE}}..."
+        while true; do
+          RESULT=$(curl -sk \
+            -H "Authorization: {{.PVE_AUTH}}" \
+            "https://{{.NODE}}.{{.DOMAIN}}:8006/api2/json/nodes/{{.NODE}}/tasks/{{.UPID}}/status" \
+            | jq -r '.data | "\(.status) \(.exitstatus // "")"')
+          STATUS=$(echo "$RESULT" | awk '{print $1}')
+          EXIT=$(echo "$RESULT" | awk '{print $2}')
+          if [ "$STATUS" = "stopped" ]; then
+            if [ "$EXIT" = "OK" ]; then
+              echo "Task completed successfully"
+            else
+              echo "Task failed: $EXIT"
+              exit 1
+            fi
+            break
+          fi
+          printf "."
+          sleep 3
+        done
+
+  # ---------------------------------------------------------------------------
+  # Cluster Lifecycle
+  # ---------------------------------------------------------------------------
+
+  pve:cluster:list:
+    desc: List available cluster profiles
+    silent: true
+    cmds:
+      - |
+        echo "Available cluster profiles:"
+        echo ""
+        for f in {{.SKILL_DIR}}/clusters/*.yaml; do
+          name=$(yq '.name' "$f")
+          type=$(yq '.type' "$f")
+          cp_count=$(yq '.nodes.controlplane.count' "$f")
+          w_count=$(yq '.nodes.workers.count' "$f")
+          tags=$(yq '.tags | join(", ")' "$f")
+          printf "  %-20s type=%-8s cp=%s w=%s  tags=[%s]\n" "$name" "$type" "$cp_count" "$w_count" "$tags"
+        done
+
+  pve:cluster:status:
+    desc: Show VMs belonging to a cluster profile
+    silent: true
+    requires:
+      vars: [PROFILE]
+    cmds:
+      - |
+        PROFILE_FILE="{{.SKILL_DIR}}/clusters/{{.PROFILE}}.yaml"
+        if [ ! -f "$PROFILE_FILE" ]; then
+          echo "Profile not found: $PROFILE_FILE"
+          exit 1
+        fi
+
+        # Build jq filter for AND-matching all profile tags
+        TAGS=$(yq -r '.tags[]' "$PROFILE_FILE")
+        JQ_FILTER='select(.template != 1)'
+        for tag in $TAGS; do
+          JQ_FILTER="$JQ_FILTER | select(.tags // \"\" | split(\";\") | any(. == \"$tag\"))"
+        done
+
+        echo "VMs matching profile {{.PROFILE}}:"
+        echo ""
+        curl -sk \
+          -H "Authorization: {{.PVE_AUTH}}" \
+          "{{.PVE_API}}/cluster/resources?type=vm" \
+          | jq -r "
+            [\"VMID\",\"NAME\",\"STATUS\",\"NODE\",\"MEM\",\"TAGS\"],
+            [\"----\",\"----\",\"------\",\"----\",\"---\",\"----\"],
+            (.data | sort_by(.vmid)[] | ${JQ_FILTER} |
+              [.vmid, .name, .status, .node,
+               (.maxmem / 1073741824 | floor | tostring + \"G\"),
+               .tags]) | @tsv" \
+          | column -t
+
+  pve:cluster:create:
+    desc: Provision a cluster from a profile (clone, configure, migrate, resize, start)
+    silent: true
+    requires:
+      vars: [PROFILE]
+    cmds:
+      - |
+        PROFILE_FILE="{{.SKILL_DIR}}/clusters/{{.PROFILE}}.yaml"
+        if [ ! -f "$PROFILE_FILE" ]; then
+          echo "Profile not found: $PROFILE_FILE"
+          exit 1
+        fi
+
+        TEMPLATE=$(yq '.template' "$PROFILE_FILE")
+        TAGS_CSV=$(yq '.tags | join(";")' "$PROFILE_FILE")
+        DISK_SIZE=$(yq '.nodes.controlplane.disk' "$PROFILE_FILE")
+        CORES=$(yq '.nodes.controlplane.cores' "$PROFILE_FILE")
+        MEMORY=$(yq '.nodes.controlplane.memory' "$PROFILE_FILE")
+
+        # Resolve template node
+        TMPL_NODE=$(curl -sk \
+          -H "Authorization: {{.PVE_AUTH}}" \
+          "{{.PVE_API}}/cluster/resources?type=vm" \
+          | jq -r ".data[] | select(.vmid == $TEMPLATE) | .node")
+        [ -z "$TMPL_NODE" ] || [ "$TMPL_NODE" = "null" ] && echo "Template $TEMPLATE not found" && exit 1
+        echo "Template $TEMPLATE is on $TMPL_NODE"
+
+        # Read assignments
+        CP_COUNT=$(yq '.nodes.controlplane.count' "$PROFILE_FILE")
+        echo ""
+        echo "=== Phase 1: Clone ==="
+        for i in $(seq 0 $((CP_COUNT - 1))); do
+          NAME=$(yq ".nodes.controlplane.assignments[$i].name" "$PROFILE_FILE")
+          VMID=$(yq ".nodes.controlplane.assignments[$i].vmid" "$PROFILE_FILE")
+          TARGET=$(yq ".nodes.controlplane.assignments[$i].node" "$PROFILE_FILE")
+          IP=$(yq ".nodes.controlplane.assignments[$i].ip" "$PROFILE_FILE")
+
+          echo "Cloning $TEMPLATE -> $VMID ($NAME) on $TMPL_NODE..."
+          UPID=$(curl -sk -X POST \
+            -H "Authorization: {{.PVE_AUTH}}" \
+            -d "newid=$VMID&name=$NAME&full=1&storage={{.STORAGE}}" \
+            "https://$TMPL_NODE.{{.DOMAIN}}:8006/api2/json/nodes/$TMPL_NODE/qemu/$TEMPLATE/clone" \
+            | jq -r '.data // ""')
+          [ -z "$UPID" ] && echo "  ERROR: clone returned no UPID" && continue
+
+          # Wait for clone
+          while true; do
+            STATUS=$(curl -sk \
+              -H "Authorization: {{.PVE_AUTH}}" \
+              "https://$TMPL_NODE.{{.DOMAIN}}:8006/api2/json/nodes/$TMPL_NODE/tasks/$UPID/status" \
+              | jq -r '.data.status')
+            [ "$STATUS" = "stopped" ] && break
+            sleep 3
+          done
+          echo "  Clone complete: $NAME ($VMID)"
+        done
+
+        echo ""
+        echo "=== Phase 2: Configure ==="
+        for i in $(seq 0 $((CP_COUNT - 1))); do
+          NAME=$(yq ".nodes.controlplane.assignments[$i].name" "$PROFILE_FILE")
+          VMID=$(yq ".nodes.controlplane.assignments[$i].vmid" "$PROFILE_FILE")
+          IP=$(yq ".nodes.controlplane.assignments[$i].ip" "$PROFILE_FILE")
+
+          # Build tag string: profile tags + controlplane role
+          VM_TAGS="${TAGS_CSV};controlplane"
+
+          # Derive gateway from IP (assume /24, gateway is .1)
+          GW=$(echo "$IP" | sed 's/\.[0-9]*$/.1/')
+
+          echo "Configuring $NAME ($VMID): ${CORES}c/${MEMORY}M, ip=$IP/24..."
+          curl -sk -X PUT \
+            -H "Authorization: {{.PVE_AUTH}}" \
+            -d "cores=$CORES&memory=$MEMORY&tags=$VM_TAGS&ipconfig0=ip=$IP/24,gw=$GW" \
+            "https://$TMPL_NODE.{{.DOMAIN}}:8006/api2/json/nodes/$TMPL_NODE/qemu/$VMID/config" > /dev/null
+        done
+
+        echo ""
+        echo "=== Phase 3: Migrate ==="
+        for i in $(seq 0 $((CP_COUNT - 1))); do
+          NAME=$(yq ".nodes.controlplane.assignments[$i].name" "$PROFILE_FILE")
+          VMID=$(yq ".nodes.controlplane.assignments[$i].vmid" "$PROFILE_FILE")
+          TARGET=$(yq ".nodes.controlplane.assignments[$i].node" "$PROFILE_FILE")
+
+          if [ "$TARGET" = "$TMPL_NODE" ]; then
+            echo "$NAME ($VMID) already on $TARGET -- skipping migration"
+            continue
+          fi
+
+          echo "Migrating $NAME ($VMID) from $TMPL_NODE -> $TARGET..."
+          UPID=$(curl -sk -X POST \
+            -H "Authorization: {{.PVE_AUTH}}" \
+            -d "target=$TARGET&online=0" \
+            "https://$TMPL_NODE.{{.DOMAIN}}:8006/api2/json/nodes/$TMPL_NODE/qemu/$VMID/migrate" \
+            | jq -r '.data // ""')
+          [ -z "$UPID" ] && echo "  ERROR: migrate returned no UPID" && continue
+
+          # Wait for migration
+          while true; do
+            STATUS=$(curl -sk \
+              -H "Authorization: {{.PVE_AUTH}}" \
+              "https://$TMPL_NODE.{{.DOMAIN}}:8006/api2/json/nodes/$TMPL_NODE/tasks/$UPID/status" \
+              | jq -r '.data.status')
+            [ "$STATUS" = "stopped" ] && break
+            sleep 5
+          done
+          echo "  Migration complete: $NAME -> $TARGET"
+        done
+
+        echo ""
+        echo "=== Phase 4: Resize disks ==="
+        for i in $(seq 0 $((CP_COUNT - 1))); do
+          NAME=$(yq ".nodes.controlplane.assignments[$i].name" "$PROFILE_FILE")
+          VMID=$(yq ".nodes.controlplane.assignments[$i].vmid" "$PROFILE_FILE")
+
+          # Re-resolve node after migration
+          VM_NODE=$(curl -sk \
+            -H "Authorization: {{.PVE_AUTH}}" \
+            "{{.PVE_API}}/cluster/resources?type=vm" \
+            | jq -r ".data[] | select(.vmid == $VMID) | .node")
+
+          echo "Resizing $NAME ($VMID) disk to $DISK_SIZE on $VM_NODE..."
+          curl -sk -X PUT \
+            -H "Authorization: {{.PVE_AUTH}}" \
+            -d "disk=scsi0&size=$DISK_SIZE" \
+            "https://$VM_NODE.{{.DOMAIN}}:8006/api2/json/nodes/$VM_NODE/qemu/$VMID/resize" > /dev/null
+        done
+
+        echo ""
+        echo "=== Phase 5: Start ==="
+        for i in $(seq 0 $((CP_COUNT - 1))); do
+          NAME=$(yq ".nodes.controlplane.assignments[$i].name" "$PROFILE_FILE")
+          VMID=$(yq ".nodes.controlplane.assignments[$i].vmid" "$PROFILE_FILE")
+
+          VM_NODE=$(curl -sk \
+            -H "Authorization: {{.PVE_AUTH}}" \
+            "{{.PVE_API}}/cluster/resources?type=vm" \
+            | jq -r ".data[] | select(.vmid == $VMID) | .node")
+
+          echo "Starting $NAME ($VMID) on $VM_NODE..."
+          curl -sk -X POST \
+            -H "Authorization: {{.PVE_AUTH}}" \
+            "https://$VM_NODE.{{.DOMAIN}}:8006/api2/json/nodes/$VM_NODE/qemu/$VMID/status/start" > /dev/null
+        done
+
+        echo ""
+        echo "=== Summary ==="
+        sleep 3
+        curl -sk \
+          -H "Authorization: {{.PVE_AUTH}}" \
+          "{{.PVE_API}}/cluster/resources?type=vm" \
+          | jq -r --arg tags "$TAGS_CSV" '
+            ($tags | split(";")) as $required |
+            ["VMID","NAME","STATUS","NODE","MEM"],
+            ["----","----","------","----","---"],
+            (.data | sort_by(.vmid)[] | select(.template != 1) |
+              select((.tags // "" | split(";")) as $t | ($required | all(. as $r | $r | IN($t[])))) |
+              [.vmid, .name, .status, .node,
+               (.maxmem / 1073741824 | floor | tostring + "G")]) | @tsv' \
+          | column -t
+
+  pve:cluster:teardown:
+    desc: Destroy all VMs belonging to a cluster profile
+    silent: true
+    requires:
+      vars: [PROFILE]
+    prompt: "This will PERMANENTLY DELETE all VMs matching the profile tags. Continue?"
+    cmds:
+      - |
+        PROFILE_FILE="{{.SKILL_DIR}}/clusters/{{.PROFILE}}.yaml"
+        if [ ! -f "$PROFILE_FILE" ]; then
+          echo "Profile not found: $PROFILE_FILE"
+          exit 1
+        fi
+
+        TAGS=$(yq -r '.tags[]' "$PROFILE_FILE")
+
+        # Build jq filter for AND-matching all profile tags
+        JQ_SELECT='select(.template != 1)'
+        for tag in $TAGS; do
+          JQ_SELECT="$JQ_SELECT | select(.tags // \"\" | split(\";\") | any(. == \"$tag\"))"
+        done
+
+        # Get matching VMs
+        VMS=$(curl -sk \
+          -H "Authorization: {{.PVE_AUTH}}" \
+          "{{.PVE_API}}/cluster/resources?type=vm" \
+          | jq -r ".data[] | ${JQ_SELECT} | \"\(.node) \(.vmid) \(.name) \(.status)\"")
+
+        if [ -z "$VMS" ]; then
+          echo "No VMs found matching profile {{.PROFILE}}"
+          exit 0
+        fi
+
+        echo "VMs to destroy:"
+        echo "$VMS" | while read node vmid name status; do
+          printf "  %-8s VMID=%-6s %-20s %s\n" "$node" "$vmid" "$name" "$status"
+        done
+        echo ""
+
+        # Shutdown running VMs
+        echo "=== Shutting down running VMs ==="
+        echo "$VMS" | while read node vmid name status; do
+          if [ "$status" = "running" ]; then
+            echo "  Stopping $name ($vmid) on $node..."
+            curl -sk -X POST \
+              -H "Authorization: {{.PVE_AUTH}}" \
+              "https://$node.{{.DOMAIN}}:8006/api2/json/nodes/$node/qemu/$vmid/status/stop" > /dev/null
+          fi
+        done
+
+        # Wait for all to stop
+        echo "  Waiting for VMs to stop..."
+        for attempt in $(seq 1 30); do
+          ALL_STOPPED=true
+          echo "$VMS" | while read node vmid name status; do
+            s=$(curl -sk \
+              -H "Authorization: {{.PVE_AUTH}}" \
+              "https://$node.{{.DOMAIN}}:8006/api2/json/nodes/$node/qemu/$vmid/status/current" \
+              | jq -r '.data.status // "stopped"')
+            if [ "$s" != "stopped" ]; then
+              ALL_STOPPED=false
+            fi
+          done
+          $ALL_STOPPED && break
+          sleep 2
+        done
+
+        # Delete all VMs
+        echo ""
+        echo "=== Deleting VMs ==="
+        echo "$VMS" | while read node vmid name status; do
+          echo "  Deleting $name ($vmid) on $node..."
+          curl -sk -X DELETE \
+            -H "Authorization: {{.PVE_AUTH}}" \
+            "https://$node.{{.DOMAIN}}:8006/api2/json/nodes/$node/qemu/$vmid?purge=1&destroy-unreferenced-disks=1" > /dev/null
+        done
+
+        echo ""
+        echo "Teardown complete for profile {{.PROFILE}}"

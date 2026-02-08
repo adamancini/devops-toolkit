@@ -1,7 +1,7 @@
 ---
 name: proxmox-manager
 description: Use when the user asks to "create a proxmox VM", "make a VM template", "migrate VM", "check proxmox status", "evacuate node", "manage proxmox snapshots", "import cloud image", "spin up a cluster", "tear down cluster", "check node health", "list VMs", "clone template", "upload ISO", "manage proxmox storage", "create proxmox API token", "bootstrap proxmox credentials", or mentions Proxmox VE cluster operations, VM lifecycle management, template creation, node maintenance, or cluster provisioning.
-version: 0.5.0
+version: 0.6.0
 ---
 
 # Proxmox Manager Skill
@@ -1017,6 +1017,75 @@ Common host patterns:
 | `pve*` | All Proxmox hosts |
 | `k0s01,k0s02` | Specific nodes by name |
 | `all:!workers` | Everything except workers |
+
+## Taskfile CLI
+
+A `Taskfile.yml` in this skill directory wraps common Proxmox API operations as ergonomic one-liners using [go-task](https://taskfile.dev/). This is a convenience wrapper -- all operations can still be performed via raw API calls as documented above.
+
+### Requirements
+
+- `go-task` v3+
+- `jq`
+- `yq` (for cluster profile operations)
+- `pass` (credentials are resolved at runtime via `$(pass show ...)` -- never stored in variables)
+
+### Usage
+
+Run from the skill directory (`skills/proxmox-manager/`):
+
+```bash
+# List all available tasks
+task --list
+
+# Verify API connectivity
+task pve:check
+
+# List all VMs
+task pve:vms
+
+# List templates
+task pve:templates
+
+# Show VM config
+task pve:vm:config VMID=1031
+
+# Start / stop a VM
+task pve:vm:start VMID=1031
+task pve:vm:stop VMID=1031
+
+# Clone a template
+task pve:vm:clone TEMPLATE=101 VMID=1040 NAME=test-vm
+
+# Set VM configuration (any combination of CORES, MEMORY, TAGS, IP)
+task pve:vm:set VMID=1031 CORES=4 MEMORY=8192 IP=10.0.0.31/24
+
+# Migrate a VM
+task pve:vm:migrate VMID=1031 TARGET=pve02
+
+# Resize a disk
+task pve:vm:resize VMID=1031 SIZE=+50G
+
+# Cluster operations
+task pve:cluster:list
+task pve:cluster:status PROFILE=talos-staging
+task pve:cluster:create PROFILE=talos-staging
+task pve:cluster:teardown PROFILE=talos-staging
+```
+
+### Node Resolution
+
+Most VM operations automatically resolve the node hosting a given VMID by querying `cluster/resources`. You only need to pass `VMID` -- not the node name.
+
+### Clone Behavior
+
+`pve:vm:clone` always clones to the same node as the template to avoid `can't clone to non-shared storage` errors. To place a VM on another node, clone first then migrate with `pve:vm:migrate`.
+
+### Destructive Operations
+
+Tasks that destroy data require interactive confirmation:
+- `pve:vm:kill` -- force-stop
+- `pve:vm:delete` -- permanent deletion (auto-stops running VMs first)
+- `pve:cluster:teardown` -- destroys all VMs matching profile tags
 
 ## Troubleshooting
 
