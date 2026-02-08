@@ -306,28 +306,29 @@ tasks:
           | jq -r '.data[] | select(.vmid == {{.VMID}}) | .node')
         [ -z "$VM_NODE" ] || [ "$VM_NODE" = "null" ] && echo "VMID {{.VMID}} not found" && exit 1
 
-        PARAMS=""
-        {{if .CORES}}PARAMS="${PARAMS}&cores={{.CORES}}"{{end}}
-        {{if .MEMORY}}PARAMS="${PARAMS}&memory={{.MEMORY}}"{{end}}
-        {{if .TAGS}}PARAMS="${PARAMS}&tags={{.TAGS}}"{{end}}
+        # Build an array of --data-urlencode args to handle special chars
+        # (semicolons in tags, slashes/commas in ipconfig0)
+        ARGS=()
+        DESC=""
+        {{if .CORES}}ARGS+=(--data-urlencode "cores={{.CORES}}"); DESC="${DESC} cores={{.CORES}}"{{end}}
+        {{if .MEMORY}}ARGS+=(--data-urlencode "memory={{.MEMORY}}"); DESC="${DESC} memory={{.MEMORY}}"{{end}}
+        {{if .TAGS}}ARGS+=(--data-urlencode "tags={{.TAGS}}"); DESC="${DESC} tags={{.TAGS}}"{{end}}
         {{if .IP}}
-        # Derive gateway as .1 of the subnet
-        GW=$(echo "{{.IP}}" | sed 's|\.[0-9]*/|.1|')
-        PARAMS="${PARAMS}&ipconfig0=ip={{.IP}},gw=${GW}"
+        # Derive gateway as .1 of the subnet (strip CIDR suffix, replace last octet)
+        GW=$(echo "{{.IP}}" | sed 's|\.[0-9]*/.*|.1|')
+        ARGS+=(--data-urlencode "ipconfig0=ip={{.IP}},gw=${GW}")
+        DESC="${DESC} ip={{.IP}},gw=${GW}"
         {{end}}
 
-        # Strip leading &
-        PARAMS="${PARAMS#&}"
-
-        if [ -z "$PARAMS" ]; then
+        if [ ${#ARGS[@]} -eq 0 ]; then
           echo "No configuration parameters specified. Use CORES, MEMORY, TAGS, or IP."
           exit 1
         fi
 
-        echo "Setting config on VMID {{.VMID}} ($VM_NODE): $PARAMS"
+        echo "Setting config on VMID {{.VMID}} ($VM_NODE):${DESC}"
         curl -sk -X PUT \
           -H "Authorization: {{.PVE_AUTH}}" \
-          -d "$PARAMS" \
+          "${ARGS[@]}" \
           "https://$VM_NODE.{{.DOMAIN}}:8006/api2/json/nodes/$VM_NODE/qemu/{{.VMID}}/config" \
           | jq '.'
 
