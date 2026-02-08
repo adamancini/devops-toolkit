@@ -898,6 +898,8 @@ flux:
 
 ### Profile Conventions
 
+**Note:** Cluster profiles contain environment-specific values (domain names, repository URLs, IP addresses). The `talos-staging.yaml` profile is a working example for the annarchy.net cluster. When creating new profiles, substitute values appropriate for your environment.
+
 **Naming:** The YAML filename must match the `name` field (e.g., `talos-staging.yaml` for `name: talos-staging`).
 
 **Tags:** Every VM in the cluster receives the tags listed in the profile. During creation, role-specific tags (`controlplane` or `worker`) are appended automatically. Tags are the primary mechanism for identifying cluster membership -- teardown and status queries filter by tag.
