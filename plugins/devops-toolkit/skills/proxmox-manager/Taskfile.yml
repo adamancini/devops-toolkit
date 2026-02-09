@@ -511,10 +511,12 @@ tasks:
           # Derive gateway from IP (assume /24, gateway is .1)
           GW=$(echo "$IP" | sed 's/\.[0-9]*$/.1/')
 
-          echo "Configuring $NAME ($VMID): ${CORES}c/${MEMORY}M, ip=$IP/24..."
+          echo "Configuring $NAME ($VMID): ${CORES}c/${MEMORY}M, tags=$VM_TAGS..."
           curl -sk -X PUT \
             -H "Authorization: {{.PVE_AUTH}}" \
-            -d "cores=$CORES&memory=$MEMORY&tags=$VM_TAGS&ipconfig0=ip=$IP/24,gw=$GW" \
+            --data-urlencode "cores=$CORES" \
+            --data-urlencode "memory=$MEMORY" \
+            --data-urlencode "tags=$VM_TAGS" \
             "https://$TMPL_NODE.{{.DOMAIN}}:8006/api2/json/nodes/$TMPL_NODE/qemu/$VMID/config" > /dev/null
         done
 

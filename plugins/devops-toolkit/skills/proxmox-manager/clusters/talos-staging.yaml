@@ -1,58 +1,59 @@
 # Cluster profile: talos-staging
 # Talos Kubernetes staging cluster on the annarchy.net Proxmox cluster.
+# Runs alongside existing k0s cluster (VMIDs 1031-1033, IPs .31-.33).
 
 name: talos-staging
 type: talos
 
 talos:
-  version: "1.9"
+  version: "1.9.6"
   kubernetes_version: "1.32.0"
   config_dir: ~/src/github.com/adamancini/fleet-infra/talos/staging
   secrets_file: secrets.yaml
   factory:
-    schematic_id: ""
+    schematic_id: "6ebbfe35c8225645c05d4d19eaad385bd1ec795954932d0ada671388272fec19"
     extensions:
       - siderolabs/qemu-guest-agent
       - siderolabs/iscsi-tools
   patches_dir: patches/
   vip:
     interface: eth0
-    ip: 10.0.0.30
+    ip: 10.0.0.50
 
 network:
-  api_endpoint: 10.0.0.30
+  api_endpoint: 10.0.0.50
   pod_cidr: 10.244.0.0/16
   service_cidr: 10.96.0.0/12
 
 nodes:
   controlplane:
     count: 3
-    name_prefix: k0s
+    name_prefix: ts
     cores: 4
     memory: 8192
     disk: 100G
-    start_vmid: 1031
+    start_vmid: 1051
     placement: spread
     assignments:
-      - name: k0s01
+      - name: ts01
         node: pve01
-        vmid: 1031
-        ip: 10.0.0.31
-      - name: k0s02
+        vmid: 1051
+        ip: 10.0.0.51
+      - name: ts02
         node: pve02
-        vmid: 1032
-        ip: 10.0.0.32
-      - name: k0s03
+        vmid: 1052
+        ip: 10.0.0.52
+      - name: ts03
         node: pve03
-        vmid: 1033
-        ip: 10.0.0.33
+        vmid: 1053
+        ip: 10.0.0.53
   workers:
     count: 0
-    name_prefix: k0w
+    name_prefix: tw
     cores: 4
     memory: 8192
     disk: 100G
-    start_vmid: 1041
+    start_vmid: 1061
     placement: spread
     assignments: []
 
