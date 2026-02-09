@@ -681,3 +681,367 @@ tasks:
 
         echo ""
         echo "Teardown complete for profile {{.PROFILE}}"
+
+  # ---------------------------------------------------------------------------
+  # Talos Linux Operations
+  # ---------------------------------------------------------------------------
+
+  talos:health:
+    desc: Check Talos cluster health
+    silent: true
+    requires:
+      vars: [PROFILE]
+    cmds:
+      - |
+        PROFILE_FILE="{{.SKILL_DIR}}/clusters/{{.PROFILE}}.yaml"
+        if [ ! -f "$PROFILE_FILE" ]; then
+          echo "Profile not found: $PROFILE_FILE"
+          exit 1
+        fi
+
+        CONFIG_DIR=$(yq '.talos.config_dir' "$PROFILE_FILE")
+        CONFIG_DIR="${CONFIG_DIR/#\~/$HOME}"
+        export TALOSCONFIG="${CONFIG_DIR}/talosconfig"
+
+        talosctl health
+
+  talos:status:
+    desc: Show Talos cluster members and Kubernetes nodes
+    silent: true
+    requires:
+      vars: [PROFILE]
+    cmds:
+      - |
+        PROFILE_FILE="{{.SKILL_DIR}}/clusters/{{.PROFILE}}.yaml"
+        if [ ! -f "$PROFILE_FILE" ]; then
+          echo "Profile not found: $PROFILE_FILE"
+          exit 1
+        fi
+
+        CONFIG_DIR=$(yq '.talos.config_dir' "$PROFILE_FILE")
+        CONFIG_DIR="${CONFIG_DIR/#\~/$HOME}"
+        export TALOSCONFIG="${CONFIG_DIR}/talosconfig"
+
+        echo "=== Talos Members ==="
+        talosctl get members
+        echo ""
+        echo "=== Kubernetes Nodes ==="
+        kubectl get nodes -o wide
+
+  talos:gen:secrets:
+    desc: Generate Talos cluster secrets
+    silent: true
+    requires:
+      vars: [PROFILE]
+    cmds:
+      - |
+        PROFILE_FILE="{{.SKILL_DIR}}/clusters/{{.PROFILE}}.yaml"
+        if [ ! -f "$PROFILE_FILE" ]; then
+          echo "Profile not found: $PROFILE_FILE"
+          exit 1
+        fi
+
+        CONFIG_DIR=$(yq '.talos.config_dir' "$PROFILE_FILE")
+        CONFIG_DIR="${CONFIG_DIR/#\~/$HOME}"
+        SECRETS_FILE=$(yq '.talos.secrets_file // "secrets.yaml"' "$PROFILE_FILE")
+
+        mkdir -p "$CONFIG_DIR"
+
+        if [ -f "${CONFIG_DIR}/${SECRETS_FILE}" ]; then
+          echo "Secrets file already exists: ${CONFIG_DIR}/${SECRETS_FILE}"
+          echo "Delete it first if you want to regenerate"
+          exit 1
+        fi
+
+        echo "Generating secrets at ${CONFIG_DIR}/${SECRETS_FILE}..."
+        talosctl gen secrets -o "${CONFIG_DIR}/${SECRETS_FILE}"
+        echo "Done. Store this file securely."
+
+  talos:gen:config:
+    desc: Generate Talos machine configs from cluster profile
+    silent: true
+    requires:
+      vars: [PROFILE]
+    cmds:
+      - |
+        PROFILE_FILE="{{.SKILL_DIR}}/clusters/{{.PROFILE}}.yaml"
+        if [ ! -f "$PROFILE_FILE" ]; then
+          echo "Profile not found: $PROFILE_FILE"
+          exit 1
+        fi
+
+        CLUSTER_NAME=$(yq '.name' "$PROFILE_FILE")
+        API_ENDPOINT=$(yq '.network.api_endpoint' "$PROFILE_FILE")
+        CONFIG_DIR=$(yq '.talos.config_dir' "$PROFILE_FILE")
+        CONFIG_DIR="${CONFIG_DIR/#\~/$HOME}"
+        SECRETS_FILE=$(yq '.talos.secrets_file // "secrets.yaml"' "$PROFILE_FILE")
+        TALOS_VERSION=$(yq '.talos.version' "$PROFILE_FILE")
+        K8S_VERSION=$(yq '.talos.kubernetes_version // "1.32.0"' "$PROFILE_FILE")
+        SCHEMATIC_ID=$(yq '.talos.factory.schematic_id // ""' "$PROFILE_FILE")
+        POD_CIDR=$(yq '.network.pod_cidr' "$PROFILE_FILE")
+        SERVICE_CIDR=$(yq '.network.service_cidr' "$PROFILE_FILE")
+
+        if [ ! -f "${CONFIG_DIR}/${SECRETS_FILE}" ]; then
+          echo "Secrets file not found: ${CONFIG_DIR}/${SECRETS_FILE}"
+          echo "Run 'task talos:gen:secrets PROFILE={{.PROFILE}}' first"
+          exit 1
+        fi
+
+        INSTALLER_ARGS=""
+        if [ -n "$SCHEMATIC_ID" ]; then
+          INSTALLER_ARGS="--install-image factory.talos.dev/installer/${SCHEMATIC_ID}:v${TALOS_VERSION}"
+        fi
+
+        echo "Generating configs for cluster '$CLUSTER_NAME'..."
+        talosctl gen config "$CLUSTER_NAME" "https://${API_ENDPOINT}:6443" \
+          --output-dir "$CONFIG_DIR" \
+          --with-secrets "${CONFIG_DIR}/${SECRETS_FILE}" \
+          $INSTALLER_ARGS \
+          --kubernetes-version "$K8S_VERSION" \
+          --with-cluster-discovery=false \
+          --force \
+          --config-patch "[
+            {\"op\": \"add\", \"path\": \"/cluster/network/podSubnets\", \"value\": [\"${POD_CIDR}\"]},
+            {\"op\": \"add\", \"path\": \"/cluster/network/serviceSubnets\", \"value\": [\"${SERVICE_CIDR}\"]}
+          ]"
+        echo "Generated: controlplane.yaml, worker.yaml, talosconfig"
+
+  talos:apply:
+    desc: Apply Talos configs to all nodes (--insecure for first apply)
+    silent: true
+    requires:
+      vars: [PROFILE]
+    vars:
+      INSECURE: '{{.INSECURE | default "true"}}'
+    cmds:
+      - |
+        PROFILE_FILE="{{.SKILL_DIR}}/clusters/{{.PROFILE}}.yaml"
+        if [ ! -f "$PROFILE_FILE" ]; then
+          echo "Profile not found: $PROFILE_FILE"
+          exit 1
+        fi
+
+        CONFIG_DIR=$(yq '.talos.config_dir' "$PROFILE_FILE")
+        CONFIG_DIR="${CONFIG_DIR/#\~/$HOME}"
+        PATCHES_DIR=$(yq '.talos.patches_dir // "patches/"' "$PROFILE_FILE")
+
+        INSECURE_FLAG=""
+        if [ "{{.INSECURE}}" = "true" ]; then
+          INSECURE_FLAG="--insecure"
+        fi
+
+        # Apply to control plane nodes
+        CP_COUNT=$(yq '.nodes.controlplane.count' "$PROFILE_FILE")
+        for i in $(seq 0 $((CP_COUNT - 1))); do
+          NAME=$(yq ".nodes.controlplane.assignments[$i].name" "$PROFILE_FILE")
+          IP=$(yq ".nodes.controlplane.assignments[$i].ip" "$PROFILE_FILE")
+
+          PATCH_FILE="${CONFIG_DIR}/${PATCHES_DIR}/${NAME}.yaml"
+          PATCH_ARGS=""
+          if [ -f "$PATCH_FILE" ]; then
+            PATCH_ARGS="--config-patch @${PATCH_FILE}"
+          fi
+
+          echo "Applying controlplane config to $NAME ($IP)..."
+          talosctl apply-config $INSECURE_FLAG \
+            --nodes "$IP" \
+            --file "${CONFIG_DIR}/controlplane.yaml" \
+            $PATCH_ARGS
+        done
+
+        # Apply to worker nodes
+        W_COUNT=$(yq '.nodes.workers.count' "$PROFILE_FILE")
+        if [ "$W_COUNT" -gt 0 ]; then
+          for i in $(seq 0 $((W_COUNT - 1))); do
+            NAME=$(yq ".nodes.workers.assignments[$i].name" "$PROFILE_FILE")
+            IP=$(yq ".nodes.workers.assignments[$i].ip" "$PROFILE_FILE")
+
+            PATCH_FILE="${CONFIG_DIR}/${PATCHES_DIR}/${NAME}.yaml"
+            PATCH_ARGS=""
+            if [ -f "$PATCH_FILE" ]; then
+              PATCH_ARGS="--config-patch @${PATCH_FILE}"
+            fi
+
+            echo "Applying worker config to $NAME ($IP)..."
+            talosctl apply-config $INSECURE_FLAG \
+              --nodes "$IP" \
+              --file "${CONFIG_DIR}/worker.yaml" \
+              $PATCH_ARGS
+          done
+        fi
+        echo "Config application complete"
+
+  talos:bootstrap:
+    desc: Bootstrap etcd on the first control plane node
+    silent: true
+    requires:
+      vars: [PROFILE]
+    cmds:
+      - |
+        PROFILE_FILE="{{.SKILL_DIR}}/clusters/{{.PROFILE}}.yaml"
+        if [ ! -f "$PROFILE_FILE" ]; then
+          echo "Profile not found: $PROFILE_FILE"
+          exit 1
+        fi
+
+        CONFIG_DIR=$(yq '.talos.config_dir' "$PROFILE_FILE")
+        CONFIG_DIR="${CONFIG_DIR/#\~/$HOME}"
+        FIRST_CP_IP=$(yq '.nodes.controlplane.assignments[0].ip' "$PROFILE_FILE")
+        export TALOSCONFIG="${CONFIG_DIR}/talosconfig"
+
+        echo "Bootstrapping etcd on $FIRST_CP_IP..."
+        talosctl bootstrap \
+          --nodes "$FIRST_CP_IP" \
+          --endpoints "$FIRST_CP_IP"
+        echo "Bootstrap initiated. Waiting for cluster health..."
+        talosctl health --wait-timeout 10m \
+          --nodes "$FIRST_CP_IP" \
+          --endpoints "$FIRST_CP_IP"
+        echo "Cluster healthy"
+
+  talos:kubeconfig:
+    desc: Retrieve kubeconfig from the cluster
+    silent: true
+    requires:
+      vars: [PROFILE]
+    cmds:
+      - |
+        PROFILE_FILE="{{.SKILL_DIR}}/clusters/{{.PROFILE}}.yaml"
+        if [ ! -f "$PROFILE_FILE" ]; then
+          echo "Profile not found: $PROFILE_FILE"
+          exit 1
+        fi
+
+        CONFIG_DIR=$(yq '.talos.config_dir' "$PROFILE_FILE")
+        CONFIG_DIR="${CONFIG_DIR/#\~/$HOME}"
+        FIRST_CP_IP=$(yq '.nodes.controlplane.assignments[0].ip' "$PROFILE_FILE")
+        export TALOSCONFIG="${CONFIG_DIR}/talosconfig"
+
+        echo "Retrieving kubeconfig from $FIRST_CP_IP..."
+        talosctl kubeconfig \
+          --nodes "$FIRST_CP_IP" \
+          --endpoints "$FIRST_CP_IP" \
+          --force
+        echo "Kubeconfig merged into ~/.kube/config"
+
+  talos:upgrade:k8s:
+    desc: Upgrade Kubernetes version across the cluster
+    silent: true
+    requires:
+      vars: [PROFILE, VERSION]
+    cmds:
+      - |
+        PROFILE_FILE="{{.SKILL_DIR}}/clusters/{{.PROFILE}}.yaml"
+        if [ ! -f "$PROFILE_FILE" ]; then
+          echo "Profile not found: $PROFILE_FILE"
+          exit 1
+        fi
+
+        CONFIG_DIR=$(yq '.talos.config_dir' "$PROFILE_FILE")
+        CONFIG_DIR="${CONFIG_DIR/#\~/$HOME}"
+        FIRST_CP_IP=$(yq '.nodes.controlplane.assignments[0].ip' "$PROFILE_FILE")
+        export TALOSCONFIG="${CONFIG_DIR}/talosconfig"
+
+        echo "Current versions:"
+        kubectl version --short 2>/dev/null || kubectl version
+        echo ""
+        echo "Upgrading Kubernetes to {{.VERSION}}..."
+        talosctl upgrade-k8s \
+          --to "{{.VERSION}}" \
+          --nodes "$FIRST_CP_IP" \
+          --endpoints "$FIRST_CP_IP"
+        echo ""
+        echo "Upgrade complete. Verifying..."
+        kubectl get nodes -o wide
+
+  talos:upgrade:os:
+    desc: Upgrade Talos OS on a single node
+    silent: true
+    requires:
+      vars: [PROFILE, NODE_IP, VERSION]
+    cmds:
+      - |
+        PROFILE_FILE="{{.SKILL_DIR}}/clusters/{{.PROFILE}}.yaml"
+        if [ ! -f "$PROFILE_FILE" ]; then
+          echo "Profile not found: $PROFILE_FILE"
+          exit 1
+        fi
+
+        CONFIG_DIR=$(yq '.talos.config_dir' "$PROFILE_FILE")
+        CONFIG_DIR="${CONFIG_DIR/#\~/$HOME}"
+        SCHEMATIC_ID=$(yq '.talos.factory.schematic_id // ""' "$PROFILE_FILE")
+        export TALOSCONFIG="${CONFIG_DIR}/talosconfig"
+
+        if [ -z "$SCHEMATIC_ID" ]; then
+          echo "No schematic_id in profile -- using default Talos installer"
+          INSTALLER="ghcr.io/siderolabs/installer:v{{.VERSION}}"
+        else
+          INSTALLER="factory.talos.dev/installer/${SCHEMATIC_ID}:v{{.VERSION}}"
+        fi
+
+        echo "Upgrading Talos on {{.NODE_IP}} to v{{.VERSION}}..."
+        echo "Installer: $INSTALLER"
+        talosctl upgrade \
+          --nodes "{{.NODE_IP}}" \
+          --image "$INSTALLER" \
+          --preserve
+        echo ""
+        echo "Upgrade initiated. Waiting for node to rejoin..."
+        until talosctl --nodes "{{.NODE_IP}}" --endpoints "{{.NODE_IP}}" version >/dev/null 2>&1; do
+          sleep 10
+        done
+        echo "Node {{.NODE_IP}} is back"
+        echo ""
+        talosctl version --nodes "{{.NODE_IP}}"
+
+  talos:etcd:snapshot:
+    desc: Create an etcd snapshot
+    silent: true
+    requires:
+      vars: [PROFILE]
+    cmds:
+      - |
+        PROFILE_FILE="{{.SKILL_DIR}}/clusters/{{.PROFILE}}.yaml"
+        if [ ! -f "$PROFILE_FILE" ]; then
+          echo "Profile not found: $PROFILE_FILE"
+          exit 1
+        fi
+
+        CONFIG_DIR=$(yq '.talos.config_dir' "$PROFILE_FILE")
+        CONFIG_DIR="${CONFIG_DIR/#\~/$HOME}"
+        FIRST_CP_IP=$(yq '.nodes.controlplane.assignments[0].ip' "$PROFILE_FILE")
+        export TALOSCONFIG="${CONFIG_DIR}/talosconfig"
+
+        SNAPSHOT_DIR="${CONFIG_DIR}/etcd-backups"
+        mkdir -p "$SNAPSHOT_DIR"
+        SNAPSHOT="${SNAPSHOT_DIR}/etcd-$(date +%Y%m%d-%H%M%S).snapshot"
+
+        echo "Creating etcd snapshot from $FIRST_CP_IP..."
+        talosctl etcd snapshot "$SNAPSHOT" --nodes "$FIRST_CP_IP"
+
+        if [ -s "$SNAPSHOT" ]; then
+          echo "Snapshot created: $SNAPSHOT ($(du -h "$SNAPSHOT" | cut -f1))"
+        else
+          echo "ERROR: Snapshot is empty or failed"
+          rm -f "$SNAPSHOT"
+          exit 1
+        fi
+
+  talos:dashboard:
+    desc: Launch the Talos cluster dashboard (TUI)
+    silent: true
+    requires:
+      vars: [PROFILE]
+    cmds:
+      - |
+        PROFILE_FILE="{{.SKILL_DIR}}/clusters/{{.PROFILE}}.yaml"
+        if [ ! -f "$PROFILE_FILE" ]; then
+          echo "Profile not found: $PROFILE_FILE"
+          exit 1
+        fi
+
+        CONFIG_DIR=$(yq '.talos.config_dir' "$PROFILE_FILE")
+        CONFIG_DIR="${CONFIG_DIR/#\~/$HOME}"
+        export TALOSCONFIG="${CONFIG_DIR}/talosconfig"
+
+        talosctl dashboard

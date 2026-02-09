@@ -1,7 +1,7 @@
 ---
 name: proxmox-manager
 description: Use when the user asks to "create a proxmox VM", "make a VM template", "migrate VM", "check proxmox status", "evacuate node", "manage proxmox snapshots", "import cloud image", "spin up a cluster", "tear down cluster", "check node health", "list VMs", "clone template", "upload ISO", "manage proxmox storage", "create proxmox API token", "bootstrap proxmox credentials", or mentions Proxmox VE cluster operations, VM lifecycle management, template creation, node maintenance, or cluster provisioning.
-version: 0.6.0
+version: 0.7.0
 ---
 
 # Proxmox Manager Skill
@@ -847,7 +847,18 @@ type: talos | generic
 # Talos-specific configuration (required when type: talos)
 talos:
   version: "1.9"                    # Talos release version
+  kubernetes_version: "1.32.0"      # Target Kubernetes version
   config_dir: /path/to/talos/config # Directory for generated machine configs
+  secrets_file: secrets.yaml        # Secrets file relative to config_dir
+  factory:
+    schematic_id: "abc123..."       # Image Factory schematic hash (64-char hex)
+    extensions:                     # System extensions baked into the image
+      - siderolabs/qemu-guest-agent
+      - siderolabs/iscsi-tools
+  patches_dir: patches/             # Per-node config patches relative to config_dir
+  vip:
+    interface: eth0                 # Network interface for VIP
+    ip: 10.0.0.30                   # Virtual IP for HA control plane API
 
 # Network configuration
 network:
@@ -920,6 +931,105 @@ flux:
 - Each cluster should have at least one unique tag (typically matching the cluster name) to enable unambiguous tag-based queries.
 - Flux paths must be distinct per cluster to prevent reconciliation conflicts (e.g., `clusters/staging/` vs `clusters/production/`).
 - Network CIDRs (`pod_cidr`, `service_cidr`) must not overlap between clusters sharing the same L2 network.
+
+## Talos Linux Operations
+
+Talos Linux is an immutable, API-driven Kubernetes OS. There is no SSH access -- all management is through `talosctl` and the Talos API (port 50000). Machine config is the single source of truth for node configuration.
+
+### Key Concepts
+
+- **Immutable OS:** No SSH, no shell, no package manager. All configuration is declarative via machine configs.
+- **Machine config:** A single YAML document that fully defines a node's identity, network, extensions, and Kubernetes role. Applied via `talosctl apply-config`.
+- **Factory images:** Talos images are built at `factory.talos.dev` with extensions baked in at build time. Extensions cannot be added at runtime -- a new image must be built.
+- **VIP failover:** Control plane nodes share a Virtual IP for the Kubernetes API endpoint. Talos handles ARP-based failover automatically -- no external load balancer needed.
+- **Config patches:** Per-node customization (hostname, static IP, VIP) via strategic merge patches or JSON6902 patches applied at `talosctl apply-config` or `talosctl gen config` time.
+- **A/B partitions:** Talos maintains two OS partitions for safe upgrades and automatic rollback on boot failure.
+
+### Image Factory
+
+Talos Image Factory (`factory.talos.dev`) builds custom images with system extensions. See `runbooks/talos-image-factory.md` for the full procedure.
+
+**Common extensions for PVE:**
+- `siderolabs/qemu-guest-agent` -- **required** for Proxmox integration (graceful shutdown, IP reporting)
+- `siderolabs/iscsi-tools` -- required for iSCSI-based CSI drivers
+- `siderolabs/util-linux-tools` -- provides `lsblk` and disk utilities
+
+**Schematic ID:** A 64-character hex hash encoding the exact extension set. Same input always produces the same ID. Store in the cluster profile's `talos.factory.schematic_id` for reproducibility.
+
+**Image URLs:**
+- Template image: `factory.talos.dev/image/<SCHEMATIC_ID>/v<VERSION>/nocloud-amd64.raw.xz`
+- Upgrade installer: `factory.talos.dev/installer/<SCHEMATIC_ID>:v<VERSION>`
+
+### Template Creation
+
+Create PVE templates from Talos factory images. See `runbooks/talos-template-create.md`.
+
+Key differences from generic templates:
+- Image format is `.raw.xz` (not qcow2) -- decompress with `xz -d` before import
+- No cloud-init drive -- Talos configures itself via `talosctl apply-config`
+- UEFI boot required (`bios: ovmf`)
+- Tag with `template;talos` for identification
+
+### Cluster Bootstrap
+
+Full Talos bootstrap from provisioned VMs to healthy Kubernetes cluster. See `runbooks/talos-cluster-bootstrap.md`.
+
+Workflow summary:
+1. Generate secrets (`talosctl gen secrets`) -- one-time, store securely
+2. Generate base machine configs (`talosctl gen config`) with factory installer image
+3. Create per-node patches for static IPs, hostnames, and VIP
+4. Apply configs to all nodes (`talosctl apply-config --insecure`)
+5. Bootstrap etcd on first CP node (`talosctl bootstrap`) -- **one node only**
+6. Retrieve kubeconfig (`talosctl kubeconfig`)
+7. Verify health (`talosctl health`, `kubectl get nodes`)
+
+### Upgrade Procedures
+
+Rolling upgrades for Talos OS and Kubernetes. See `runbooks/talos-upgrade.md`.
+
+**Kubernetes upgrade:** `talosctl upgrade-k8s --to <version>` -- targets one CP node, orchestrates the entire cluster.
+
+**Talos OS upgrade:** `talosctl upgrade --image <factory-installer> --preserve` -- one node at a time, verify health between each.
+
+**Order:** Always upgrade Kubernetes first, then Talos OS.
+
+### Day-2 Operations
+
+**etcd backups:** See `runbooks/talos-etcd-backup.md`. Take snapshots before upgrades and on a regular schedule. Store off-cluster.
+
+**Certificate rotation:** Talos handles internal certificate rotation automatically. Cluster CA certificates have a 10-year lifetime by default.
+
+**Node replacement:** To replace a failed node, provision a new VM from the template, apply the appropriate machine config (reusing the old node's patch with the new IP if needed), and let it join the cluster. Remove the old node from etcd membership if it cannot rejoin: `talosctl etcd remove-member --nodes <healthy_cp> <failed_member_id>`.
+
+### talosctl Quick Reference
+
+| Command | Purpose |
+|---------|---------|
+| `talosctl health` | Cluster health check (etcd, kubelet, API server, scheduler, controller-manager) |
+| `talosctl get members` | List cluster members and their roles |
+| `talosctl get disks --insecure --nodes <ip>` | Disk discovery on maintenance-mode nodes |
+| `talosctl dashboard` | Live cluster dashboard (TUI) |
+| `talosctl logs <service> --nodes <ip>` | Service logs (kubelet, etcd, apid, machined, etc.) |
+| `talosctl services --nodes <ip>` | List running Talos services |
+| `talosctl containers -k --nodes <ip>` | List Kubernetes containers on a node |
+| `talosctl version --nodes <ip>` | Show Talos and Kubernetes versions |
+| `talosctl get extensions --nodes <ip>` | List installed system extensions |
+| `talosctl etcd members` | List etcd cluster members |
+| `talosctl etcd snapshot <path> --nodes <ip>` | Create etcd snapshot |
+| `talosctl apply-config --nodes <ip> --file <yaml>` | Apply or update machine config |
+| `talosctl upgrade --nodes <ip> --image <ref>` | Upgrade Talos OS on a node |
+| `talosctl upgrade-k8s --to <version>` | Upgrade Kubernetes version cluster-wide |
+
+### Future: Cluster API (CAPI)
+
+Declarative, GitOps-driven cluster provisioning is possible via Cluster API with Talos providers. This is not currently implemented but noted for future consideration.
+
+Key architecture:
+- Requires a management cluster running CAPI controllers
+- Uses `cluster-api-provider-proxmox` (IONOS) for PVE VM provisioning
+- Uses `cluster-api-bootstrap-provider-talos` and `cluster-api-control-plane-provider-talos` for Talos machine config management
+- Template must use nocloud image (not bare-metal)
+- Enables declarative cluster lifecycle managed through Kubernetes CRDs and reconciled by controllers
 
 ## Ansible Integration
 

@@ -40,6 +40,12 @@ cloudinit:
   ssh_keys_source: ~/.ssh/authorized_keys
   vendor_snippet_path: /var/lib/vz/snippets/
 
+talos:
+  default_extensions:
+    - siderolabs/qemu-guest-agent
+  factory_base_url: https://factory.talos.dev
+  default_kubernetes_version: "1.32.0"
+
 ansible:
   fleet_infra_path: ~/src/github.com/adamancini/fleet-infra
   inventory: playbooks/inventories/annarchy.net/hosts.yaml

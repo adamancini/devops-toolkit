@@ -6,7 +6,18 @@ type: talos
 
 talos:
   version: "1.9"
+  kubernetes_version: "1.32.0"
   config_dir: ~/src/github.com/adamancini/fleet-infra/talos/staging
+  secrets_file: secrets.yaml
+  factory:
+    schematic_id: ""
+    extensions:
+      - siderolabs/qemu-guest-agent
+      - siderolabs/iscsi-tools
+  patches_dir: patches/
+  vip:
+    interface: eth0
+    ip: 10.0.0.30
 
 network:
   api_endpoint: 10.0.0.30
