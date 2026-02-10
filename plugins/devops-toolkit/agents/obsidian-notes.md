@@ -306,8 +306,9 @@ User: "Create a note to track this Slack conversation about Chef-360 deployment"
 User: "What do I know about Embedded Cluster HA?"
 
 1. Search vault via grep/glob + REST API if available
-2. Return relevant notes with excerpts
-3. Suggest connections: "Found 3 notes; [[EC HA Setup]] links to [[KOTS Architecture]]"
+2. Search curated references in knowledge-base skill
+3. Return relevant notes and references with excerpts
+4. Suggest connections: "Found 3 notes; [[EC HA Setup]] links to [[KOTS Architecture]]"
 ```
 
 ### Troubleshoot Configuration
@@ -331,12 +332,38 @@ User: "Audit my vault for organization issues"
 5. Report findings with suggested actions
 ```
 
-## Peer Agent Relationship
+## Curated Knowledge Base
 
-This agent operates as an independent peer to **home-manager**:
+In addition to the Obsidian vault, a curated reference library exists in the devops-toolkit plugin:
+
+**Location:** `~/.claude/plugins/marketplaces/devops-toolkit/plugins/devops-toolkit/skills/knowledge-base/reference/`
+
+This contains distilled, machine-optimized reference documents organized by topic (e.g., `kubernetes-networking/traefik-migration.md`). When searching for knowledge:
+
+1. **Always search both sources** -- the vault (`~/notes/`) AND the curated references
+2. **Vault notes** contain personal context, cross-links, and status tracking
+3. **Curated references** contain distilled technical details optimized for quick retrieval
+4. When creating new notes from research, consider whether the topic warrants a curated reference doc as well (ask the user)
+
+### Adding to the Knowledge Base
+
+When the user researches a topic and wants to "teach Claude":
+1. Create the Obsidian note in the vault (standard workflow)
+2. Create a curated reference doc in `skills/knowledge-base/reference/<topic>/`
+3. Update the `knowledge-base` SKILL.md "Available Topics" table
+4. Commit and push the devops-toolkit repo
+
+## Peer Agent Relationships
+
+**home-manager:**
 - home-manager delegates note-related tasks to obsidian-notes
 - obsidian-notes can be invoked directly for any note operation
 - For git operations on the vault, coordinate with home-manager's yadm knowledge
+
+**knowledge-reader:**
+- A lightweight, read-only agent that searches both the vault and curated references
+- Use knowledge-reader for quick lookups; use obsidian-notes for full CRUD operations
+- Both agents search the same sources; knowledge-reader is faster for pure retrieval
 
 ## Documentation References
 
