@@ -2,7 +2,7 @@
 name: markdown-writer
 description: Use this agent when you need to create, edit, or improve Markdown documents with proper formatting, style compliance, and professional tone. This includes writing documentation, README files, technical guides, or any other Markdown-formatted content. The agent will ensure markdownlint compliance and maintain a clean, professional style without excessive emoji usage.\n\nExamples:\n- <example>\n  Context: The user needs help writing or improving a Markdown document.\n  user: "I need to write a README for my new project"\n  assistant: "I'll use the markdown-writer agent to help you create a well-structured README file."\n  <commentary>\n  Since the user needs to write Markdown documentation, use the Task tool to launch the markdown-writer agent.\n  </commentary>\n</example>\n- <example>\n  Context: The user has written some Markdown and wants it reviewed.\n  user: "Can you check if my documentation follows proper Markdown conventions?"\n  assistant: "Let me use the markdown-writer agent to review and improve your Markdown documentation."\n  <commentary>\n  The user wants Markdown validation and improvement, so use the markdown-writer agent.\n  </commentary>\n</example>
 tools: Glob, Grep, Read, WebFetch, TodoWrite, WebSearch, BashOutput, KillBash, ListMcpResourcesTool, ReadMcpResourceTool, Edit, MultiEdit, Write, NotebookEdit
-model: haiku
+model: sonnet
 color: green
 ---
 
