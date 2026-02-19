@@ -1,6 +1,6 @@
 ---
 name: proxmox-manager
-description: Use when the user asks to "create a proxmox VM", "make a VM template", "migrate VM", "check proxmox status", "evacuate node", "manage proxmox snapshots", "import cloud image", "spin up a cluster", "tear down cluster", "check node health", "list VMs", "clone template", "upload ISO", "manage proxmox storage", "create proxmox API token", "bootstrap proxmox credentials", or mentions Proxmox VE cluster operations, VM lifecycle management, template creation, node maintenance, or cluster provisioning.
+description: Use when the user asks to "create a proxmox VM", "make a VM template", "migrate VM", "check proxmox status", "evacuate node", "manage proxmox snapshots", "import cloud image", "spin up a cluster", "tear down cluster", "check node health", "list VMs", "clone template", "upload ISO", "manage proxmox storage", "create proxmox API token", "bootstrap proxmox credentials", "bootstrap talos cluster", "deploy talos", "upgrade talos", "talos maintenance mode", "talos IP discovery", "apply talos config", "generate talos secrets", "talos image factory", "provision VMs", "run provisioning playbook", "talos-provision-vms", "ansible proxmox", "task cluster:deploy", "task cluster:teardown", "task cluster:status", "create VM template", "node maintenance", or mentions Proxmox VE cluster operations, VM lifecycle management, template creation, node maintenance, cluster provisioning, Talos Linux cluster operations, Ansible-driven VM provisioning, or Taskfile-based cluster workflows.
 version: 0.7.0
 ---
 
@@ -20,6 +20,13 @@ Invoke this skill when the user asks about:
 - Spinning up or tearing down entire clusters
 - Bootstrapping Proxmox API credentials
 - Ingesting new operational procedures from URLs or instructions
+- Talos Linux cluster bootstrap, upgrade, or maintenance operations
+- Generating Talos secrets, machine configs, or config patches
+- Talos Image Factory builds (schematic creation, extension selection)
+- Talos node discovery (scanning for maintenance-mode nodes, IP resolution)
+- Ansible-driven VM provisioning (`talos-provision-vms.yaml` or similar playbooks)
+- Taskfile cluster workflows (`task cluster:deploy`, `task cluster:teardown`, `task cluster:status`)
+- Node maintenance mode operations (evacuation, rolling reboots)
 
 ## Cluster Configuration
 

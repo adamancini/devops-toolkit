@@ -7,7 +7,7 @@ requires: [talosctl, kubectl]
 
 # Talos Cluster Bootstrap
 
-This runbook covers the full Talos bootstrap procedure after VMs are provisioned and running. It replaces/extends steps 11-13 of `cluster-create.md` with detailed per-node patching, VIP configuration, and extension-aware image references.
+This runbook covers the full Talos bootstrap procedure after VMs are provisioned and running. It replaces/extends steps 11-13 of `cluster-create.md` with node discovery, detailed per-node patching, VIP configuration, and extension-aware image references.
 
 ## Parameters
 
@@ -146,7 +146,66 @@ This runbook covers the full Talos bootstrap procedure after VMs are provisioned
 
    Workers do not have the `vip` block.
 
-5. **Apply configs to control plane nodes** (local)
+5. **Node discovery -- resolve DHCP IPs to expected nodes** (local)
+
+   When VMs boot from a Talos template, they acquire DHCP addresses in maintenance mode. Before applying static configs, you must discover which IP corresponds to which expected node. Skip this step if all node IPs are already known (e.g., static DHCP reservations or prior assignment).
+
+   **Scan the subnet for Talos maintenance-mode nodes:**
+
+   ```bash
+   # Scan the expected subnet for port 50000 (Talos API in maintenance mode)
+   SUBNET="10.0.0"
+   for i in $(seq 1 254); do
+     (nc -z -w 1 "$SUBNET.$i" 50000 2>/dev/null && echo "$SUBNET.$i") &
+   done
+   wait
+   ```
+
+   Expected result: A list of IPs running the Talos maintenance API. These are your newly provisioned nodes.
+
+   **Match discovered IPs to expected nodes via MAC address (Proxmox API):**
+
+   ```bash
+   # Get MAC addresses from Proxmox VM configs
+   for vmid in <CP_VMID1> <CP_VMID2> <CP_VMID3>; do
+     INFO=$(curl -sk \
+       -H "Authorization: PVEAPIToken=$(pass show <PASS_PATH> | head -1)=$(pass show <PASS_PATH> | tail -1)" \
+       "https://<NODE_HOST>:8006/api2/json/cluster/resources?type=vm" \
+       | jq -r ".data[] | select(.vmid == $vmid) | .node")
+     MAC=$(curl -sk \
+       -H "Authorization: PVEAPIToken=$(pass show <PASS_PATH> | head -1)=$(pass show <PASS_PATH> | tail -1)" \
+       "https://$INFO.<CLUSTER_DOMAIN>:8006/api2/json/nodes/$INFO/qemu/$vmid/config" \
+       | jq -r '.data.net0' | grep -oE '([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}')
+     echo "VMID $vmid: MAC=$MAC"
+   done
+   ```
+
+   Then compare MACs against the discovered IPs using `talosctl get links`:
+
+   ```bash
+   for ip in <DISCOVERED_IPS>; do
+     MAC=$(talosctl --nodes "$ip" --endpoints "$ip" get links --insecure -o json 2>/dev/null \
+       | jq -r 'select(.spec.kind == "ether" and .spec.operationalState == "up") | .spec.hardwareAddr' \
+       | head -1)
+     echo "$ip: MAC=$MAC"
+   done
+   ```
+
+   Match the MACs from Proxmox to the MACs from talosctl to build the IP-to-node mapping.
+
+   **Fallback -- count-based matching:**
+
+   If MAC lookup is unavailable (e.g., talosctl `get links` not supported in maintenance mode), use a count-based approach:
+
+   1. Sort discovered IPs numerically
+   2. Assign them to nodes in the same order as the profile's `assignments` list
+   3. Verify the count matches the expected number of nodes
+
+   **Update node patches with discovered IPs:**
+
+   If the discovered IPs differ from the profile's `assignments[].ip`, update the per-node patches (step 4) with the actual DHCP addresses before applying static config. After applying config with the correct static IPs, the nodes will reboot with their intended addresses.
+
+6. **Apply configs to control plane nodes** (local)
 
    For each control plane node, apply the base config with the node-specific patch:
 
@@ -161,7 +220,7 @@ This runbook covers the full Talos bootstrap procedure after VMs are provisioned
 
    Apply to all CP nodes before proceeding. The nodes will reboot and come up with the applied configuration.
 
-6. **Apply configs to worker nodes** (local -- skip if no workers)
+7. **Apply configs to worker nodes** (local -- skip if no workers)
 
    ```bash
    talosctl apply-config --insecure \
@@ -170,7 +229,7 @@ This runbook covers the full Talos bootstrap procedure after VMs are provisioned
      --config-patch @<config_dir>/<patches_dir>/<worker_name>.yaml
    ```
 
-7. **Wait for nodes to become ready** (local)
+8. **Wait for nodes to become ready** (local)
 
    After config application, nodes reboot and join the Talos cluster. Wait for the Talos API to become available on the configured endpoints:
 
@@ -190,7 +249,7 @@ This runbook covers the full Talos bootstrap procedure after VMs are provisioned
 
    Expected result: All nodes respond to `talosctl version`. This confirms the Talos API is up with the applied config (no longer in maintenance mode).
 
-8. **Bootstrap etcd on the first control plane node** (local)
+9. **Bootstrap etcd on the first control plane node** (local)
 
    ```bash
    talosctl bootstrap \
@@ -202,7 +261,7 @@ This runbook covers the full Talos bootstrap procedure after VMs are provisioned
 
    Expected result: etcd cluster initialized. This is the point of no return -- after bootstrap, the cluster has state.
 
-9. **Wait for Kubernetes API** (local)
+10. **Wait for Kubernetes API** (local)
 
    ```bash
    echo "Waiting for Kubernetes API..."
@@ -215,7 +274,7 @@ This runbook covers the full Talos bootstrap procedure after VMs are provisioned
 
    Expected result: `talosctl health` reports all components healthy (etcd, kubelet, API server, scheduler, controller-manager).
 
-10. **Retrieve kubeconfig** (local)
+11. **Retrieve kubeconfig** (local)
 
     ```bash
     talosctl kubeconfig \
@@ -226,7 +285,7 @@ This runbook covers the full Talos bootstrap procedure after VMs are provisioned
 
     Expected result: Kubeconfig merged into `~/.kube/config` with a context named after the cluster. The `--force` flag overwrites any existing context with the same name.
 
-11. **Configure talosctl endpoints and nodes** (local)
+12. **Configure talosctl endpoints and nodes** (local)
 
     Update the talosconfig for ongoing management:
 
@@ -237,7 +296,7 @@ This runbook covers the full Talos bootstrap procedure after VMs are provisioned
 
     Expected result: `talosctl` commands will target all cluster nodes by default without needing `--nodes` and `--endpoints` flags.
 
-12. **Verify cluster health** (local)
+13. **Verify cluster health** (local)
 
     ```bash
     talosctl health
@@ -253,7 +312,7 @@ This runbook covers the full Talos bootstrap procedure after VMs are provisioned
 ## Cleanup
 
 - No temporary files are created during bootstrap
-- If bootstrap fails partway, the procedure is safe to retry from step 5 (re-apply configs) or step 8 (re-bootstrap)
+- If bootstrap fails partway, the procedure is safe to retry from step 6 (re-apply configs) or step 9 (re-bootstrap)
 - For a completely fresh start, tear down the VMs and reprovision
 
 ## Notes
