@@ -1,6 +1,6 @@
 ---
 name: proxmox-manager
-description: Use when the user asks to "create a proxmox VM", "make a VM template", "migrate VM", "check proxmox status", "evacuate node", "manage proxmox snapshots", "import cloud image", "spin up a cluster", "tear down cluster", "check node health", "list VMs", "clone template", "upload ISO", "manage proxmox storage", "create proxmox API token", "bootstrap proxmox credentials", "bootstrap talos cluster", "deploy talos", "upgrade talos", "talos maintenance mode", "talos IP discovery", "apply talos config", "generate talos secrets", "talos image factory", "talos image cache", "cache container images", "air-gapped talos", "provision VMs", "run provisioning playbook", "talos-provision-vms", "ansible proxmox", "task cluster:deploy", "task cluster:teardown", "task cluster:status", "create VM template", "node maintenance", or mentions Proxmox VE cluster operations, VM lifecycle management, template creation, node maintenance, cluster provisioning, Talos Linux cluster operations, Ansible-driven VM provisioning, Taskfile-based cluster workflows, or Ansible-based host configuration automation.
+description: Use when the user asks to "create a proxmox VM", "make a VM template", "migrate VM", "check proxmox status", "evacuate node", "manage proxmox snapshots", "import cloud image", "spin up a cluster", "tear down cluster", "check node health", "list VMs", "clone template", "upload ISO", "manage proxmox storage", "create proxmox API token", "bootstrap proxmox credentials", "bootstrap talos cluster", "deploy talos", "upgrade talos", "talos maintenance mode", "talos IP discovery", "apply talos config", "generate talos secrets", "talos image factory", "talos image cache", "cache container images", "air-gapped talos", "provision VMs", "run provisioning playbook", "talos-provision-vms", "ansible proxmox", "task cluster:deploy", "task cluster:teardown", "task cluster:status", "create VM template", "node maintenance", "packer talos template", "packer proxmox build", or mentions Proxmox VE cluster operations, VM lifecycle management, template creation, node maintenance, cluster provisioning, Talos Linux cluster operations, Ansible-driven VM provisioning, Taskfile-based cluster workflows, Packer-based image builds, or Ansible-based host configuration automation.
 version: 0.8.0
 ---
 
@@ -990,7 +990,11 @@ Without this config, Talos automatically removes the IMAGECACHE partition. See `
 
 ### Template Creation
 
-Create PVE templates from Talos factory images. See `runbooks/talos-template-create.md`.
+Create PVE templates from Talos factory images. Two approaches available:
+
+**SSH-based (default):** See `runbooks/talos-template-create.md`. Downloads the image to the node via SSH, imports the disk with `qm set --import-from`, and converts to template. Simpler, requires SSH access to the hypervisor.
+
+**Packer-based (CI/CD):** See `runbooks/packer-talos-template.md`. Uses HashiCorp Packer to boot a live Arch Linux ISO inside a VM, download the Talos image from Image Factory, and write it to disk via `dd`. No SSH to hypervisor required -- works entirely through the Proxmox API. Preferred for automated pipelines. Reference material at `knowledge-base/reference/packer-talos-proxmox/`.
 
 Key differences from generic templates:
 - Image format is `.raw.xz` (not qcow2) -- decompress with `xz -d` before import

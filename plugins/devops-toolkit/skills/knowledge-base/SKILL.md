@@ -22,8 +22,14 @@ knowledge-base/
 └── reference/
     ├── kubernetes-networking/
     │   └── traefik-migration.md
-    └── proxmox-ansible-host-config/
-        └── ansible-host-configuration.md
+    ├── packer-talos-proxmox/
+    │   └── packer-talos-image-factory.md
+    ├── proxmox-ansible-host-config/
+    │   └── ansible-host-configuration.md
+    ├── talos-linux/
+    │   └── ...
+    └── talos-terraform-proxmox/
+        └── terraform-talos-ha-pattern.md
 ```
 
 ### Available Topics
@@ -33,6 +39,8 @@ knowledge-base/
 | Kubernetes Networking | `reference/kubernetes-networking/` | Ingress controller migration, Traefik, Gateway API |
 | Proxmox Ansible Host Config | `reference/proxmox-ansible-host-config/` | Ansible role-based hypervisor configuration, network templating, desired-state management |
 | Talos Linux | `reference/talos-linux/` | Image cache, registry DDoS prevention, IMAGECACHE partition, registryd |
+| Talos Terraform Proxmox | `reference/talos-terraform-proxmox/` | Terraform-based Talos HA cluster on Proxmox, Cilium CNI, bpg/proxmox + siderolabs/talos providers |
+| Packer Talos Proxmox | `reference/packer-talos-proxmox/` | Packer-based Talos template creation using Image Factory API, CI/CD-friendly automation |
 
 ## How to Use References
 
