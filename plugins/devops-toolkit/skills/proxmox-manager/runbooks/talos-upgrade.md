@@ -3,6 +3,10 @@ name: talos-upgrade
 description: Upgrade Talos OS and Kubernetes versions with rolling, node-by-node procedures
 image_type: none
 requires: [talosctl, kubectl]
+tested_with:
+  talos: "1.9.x"
+  kubernetes: "1.32.x"
+  proxmox: "8.x"
 ---
 
 # Talos OS and Kubernetes Upgrades

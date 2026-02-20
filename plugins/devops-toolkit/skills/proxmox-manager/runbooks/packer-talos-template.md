@@ -3,6 +3,10 @@ name: packer-talos-template
 description: Create Talos PVE templates using HashiCorp Packer and Image Factory API (CI/CD-friendly alternative to SSH-based creation)
 image_type: raw
 requires: [packer, curl]
+tested_with:
+  talos: "1.9.x"
+  packer: "1.x"
+  proxmox: "8.x"
 ---
 
 # Packer-Based Talos Template Creation

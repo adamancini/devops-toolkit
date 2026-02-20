@@ -1,6 +1,6 @@
 {
   "name": "devops-toolkit",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "description": "Comprehensive DevOps agents and skills for infrastructure management, code quality, documentation, and workflow automation. Includes specialized agents for Ansible, Helm, Kubernetes, Linear, Obsidian, MCP security, and system configuration.",
   "author": {
     "name": "Ada Mancini"

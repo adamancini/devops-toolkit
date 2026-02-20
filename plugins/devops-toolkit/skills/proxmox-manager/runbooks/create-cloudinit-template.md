@@ -3,6 +3,8 @@ name: create-cloudinit-template
 description: Create a VM template from a cloud-init enabled disk image
 image_type: cloudinit
 requires: [api, ssh]
+tested_with:
+  proxmox: "8.x"
 ---
 
 # Create Cloud-Init VM Template

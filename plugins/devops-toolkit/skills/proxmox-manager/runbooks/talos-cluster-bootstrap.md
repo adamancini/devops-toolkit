@@ -3,6 +3,10 @@ name: talos-cluster-bootstrap
 description: Full Talos Linux cluster bootstrap with secrets, machine configs, per-node patches, VIP, and etcd initialization
 image_type: none
 requires: [talosctl, kubectl]
+tested_with:
+  talos: "1.9.x"
+  kubernetes: "1.32.x"
+  proxmox: "8.x"
 ---
 
 # Talos Cluster Bootstrap

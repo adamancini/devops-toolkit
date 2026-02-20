@@ -3,6 +3,10 @@ name: talos-image-cache
 description: Build Talos disk images with pre-cached container images to eliminate registry pulls at bootstrap
 image_type: raw
 requires: [talosctl, docker, ssh]
+tested_with:
+  talos: "1.9.x"
+  kubernetes: "1.32.x"
+  proxmox: "8.x"
 ---
 
 # Talos Image Cache

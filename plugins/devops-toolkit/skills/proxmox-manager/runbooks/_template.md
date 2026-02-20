@@ -3,6 +3,12 @@ name: procedure-name
 description: One-line description of what this procedure does
 image_type: cloudinit | iso | qcow2 | raw | none
 requires: [api, ssh]
+tested_with:
+  # Include relevant version info, e.g.:
+  # proxmox: "8.x"
+  # talos: "1.9.x"
+  # kubernetes: "1.32.x"
+  # packer: "1.x"
 ---
 
 # Procedure Title

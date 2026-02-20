@@ -3,6 +3,8 @@ name: import-qcow2-template
 description: Create a VM template by importing a pre-built qcow2 or raw disk image
 image_type: qcow2
 requires: [api, ssh]
+tested_with:
+  proxmox: "8.x"
 ---
 
 # Import qcow2/raw Disk Image as Template

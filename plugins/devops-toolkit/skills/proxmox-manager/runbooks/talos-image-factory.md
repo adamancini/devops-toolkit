@@ -3,6 +3,10 @@ name: talos-image-factory
 description: Build custom Talos Linux images with extensions via factory.talos.dev
 image_type: raw
 requires: [curl, jq]
+tested_with:
+  talos: "1.9.x"
+  kubernetes: "1.32.x"
+  proxmox: "8.x"
 ---
 
 # Talos Image Factory

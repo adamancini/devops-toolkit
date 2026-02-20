@@ -3,6 +3,8 @@ name: cluster-teardown
 description: Destroy all VMs belonging to a cluster profile
 image_type: none
 requires: [api]
+tested_with:
+  proxmox: "8.x"
 ---
 
 # Cluster Teardown

@@ -3,6 +3,8 @@ name: node-evacuation
 description: Evacuate all VMs from a node before maintenance by migrating them to other cluster members
 image_type: none
 requires: [api]
+tested_with:
+  proxmox: "8.x"
 ---
 
 # Node Evacuation

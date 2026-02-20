@@ -3,6 +3,8 @@ name: proxmox-reverse-proxy
 description: Configure HAProxy reverse proxy for Proxmox VE web UI with WebSocket support
 image_type: none
 requires: [ssh]
+tested_with:
+  proxmox: "8.x"
 ---
 
 # Proxmox Reverse Proxy (HAProxy)

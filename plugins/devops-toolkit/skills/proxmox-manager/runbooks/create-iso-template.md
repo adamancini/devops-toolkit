@@ -3,6 +3,8 @@ name: create-iso-template
 description: Create a VM template from an ISO installer with manual OS installation
 image_type: iso
 requires: [api, ssh]
+tested_with:
+  proxmox: "8.x"
 ---
 
 # Create ISO-Based VM Template

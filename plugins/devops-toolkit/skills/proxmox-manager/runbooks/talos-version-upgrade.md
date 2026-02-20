@@ -3,6 +3,10 @@ name: talos-version-upgrade
 description: Template-based Talos version upgrade -- new factory image, new PVE template, redeploy cluster
 image_type: none
 requires: [talosctl, kubectl, api, ssh]
+tested_with:
+  talos: "1.9.x"
+  kubernetes: "1.32.x"
+  proxmox: "8.x"
 ---
 
 # Talos Version Upgrade (Template-Based)

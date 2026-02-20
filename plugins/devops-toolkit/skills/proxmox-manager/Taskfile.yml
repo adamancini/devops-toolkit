@@ -1,14 +1,25 @@
 version: '3'
 
 vars:
-  PVE_AUTH: 'PVEAPIToken=$(pass show annarchy.net/pve/api-token | head -1)=$(pass show annarchy.net/pve/api-token | tail -1)'
-  PVE_NODE: '{{.PVE_NODE | default "pve01"}}'
-  PVE_HOST: '{{.PVE_NODE}}.annarchy.net'
-  PVE_API: 'https://{{.PVE_HOST}}:8006/api2/json'
-  STORAGE: '{{.STORAGE | default "local-lvm"}}'
-  DOMAIN: annarchy.net
   SKILL_DIR:
     sh: 'dirname "{{.TASKFILE}}"'
+  # Read cluster configuration from cluster-config.yaml instead of hardcoding
+  _CFG_PASS_PATH:
+    sh: 'yq -r ".credentials.pass_path" "$(dirname "{{.TASKFILE}}")/cluster-config.yaml"'
+  DOMAIN:
+    sh: 'yq -r ".cluster.name" "$(dirname "{{.TASKFILE}}")/cluster-config.yaml"'
+  _CFG_DEFAULT_NODE:
+    sh: 'yq -r ".cluster.nodes[0].name" "$(dirname "{{.TASKFILE}}")/cluster-config.yaml"'
+  _CFG_DEFAULT_STORAGE:
+    sh: 'yq -r ".defaults.storage" "$(dirname "{{.TASKFILE}}")/cluster-config.yaml"'
+  PVE_AUTH: 'PVEAPIToken=$(pass show {{._CFG_PASS_PATH}} | head -1)=$(pass show {{._CFG_PASS_PATH}} | tail -1)'
+  PVE_NODE: '{{if .PVE_NODE}}{{.PVE_NODE}}{{else}}{{._CFG_DEFAULT_NODE}}{{end}}'
+  PVE_HOST: '{{.PVE_NODE}}.{{.DOMAIN}}'
+  PVE_API: 'https://{{.PVE_HOST}}:8006/api2/json'
+  STORAGE: '{{if .STORAGE}}{{.STORAGE}}{{else}}{{._CFG_DEFAULT_STORAGE}}{{end}}'
+  # DRY helper: base command for resolving a VM's current node from the cluster API.
+  # Usage in tasks: VM_NODE=$({{._RESOLVE_NODE}} '.data[] | select(.vmid == XXXX) | .node')
+  _RESOLVE_NODE: 'curl -sk -H "Authorization: {{.PVE_AUTH}}" "{{.PVE_API}}/cluster/resources?type=vm" | jq -r'
 
 tasks:
   default:
@@ -22,7 +33,8 @@ tasks:
     silent: true
     cmds:
       - |
-        for node in pve01 pve02 pve03; do
+        NODES=$(yq -r '.cluster.nodes[].name' "{{.SKILL_DIR}}/cluster-config.yaml")
+        for node in $NODES; do
           code=$(curl -sk -o /dev/null -w "%{http_code}" \
             -H "Authorization: {{.PVE_AUTH}}" \
             "https://$node.{{.DOMAIN}}:8006/api2/json/version")
@@ -143,10 +155,7 @@ tasks:
     cmds:
       - |
         # Resolve which node the template lives on
-        TMPL_NODE=$(curl -sk \
-          -H "Authorization: {{.PVE_AUTH}}" \
-          "{{.PVE_API}}/cluster/resources?type=vm" \
-          | jq -r '.data[] | select(.vmid == {{.TEMPLATE}}) | .node')
+        TMPL_NODE=$({{._RESOLVE_NODE}} '.data[] | select(.vmid == {{.TEMPLATE}}) | .node')
         [ -z "$TMPL_NODE" ] || [ "$TMPL_NODE" = "null" ] && echo "Template {{.TEMPLATE}} not found" && exit 1
 
         echo "Cloning template {{.TEMPLATE}} -> VMID {{.VMID}} ({{.NAME}}) on $TMPL_NODE..."
@@ -163,10 +172,7 @@ tasks:
       vars: [VMID]
     cmds:
       - |
-        VM_NODE=$(curl -sk \
-          -H "Authorization: {{.PVE_AUTH}}" \
-          "{{.PVE_API}}/cluster/resources?type=vm" \
-          | jq -r '.data[] | select(.vmid == {{.VMID}}) | .node')
+        VM_NODE=$({{._RESOLVE_NODE}} '.data[] | select(.vmid == {{.VMID}}) | .node')
         [ -z "$VM_NODE" ] || [ "$VM_NODE" = "null" ] && echo "VMID {{.VMID}} not found" && exit 1
 
         echo "Starting VMID {{.VMID}} on $VM_NODE..."
@@ -182,10 +188,7 @@ tasks:
       vars: [VMID]
     cmds:
       - |
-        VM_NODE=$(curl -sk \
-          -H "Authorization: {{.PVE_AUTH}}" \
-          "{{.PVE_API}}/cluster/resources?type=vm" \
-          | jq -r '.data[] | select(.vmid == {{.VMID}}) | .node')
+        VM_NODE=$({{._RESOLVE_NODE}} '.data[] | select(.vmid == {{.VMID}}) | .node')
         [ -z "$VM_NODE" ] || [ "$VM_NODE" = "null" ] && echo "VMID {{.VMID}} not found" && exit 1
 
         echo "Shutting down VMID {{.VMID}} on $VM_NODE (ACPI)..."
@@ -202,10 +205,7 @@ tasks:
     prompt: "Force-stop VMID {{.VMID}}?"
     cmds:
       - |
-        VM_NODE=$(curl -sk \
-          -H "Authorization: {{.PVE_AUTH}}" \
-          "{{.PVE_API}}/cluster/resources?type=vm" \
-          | jq -r '.data[] | select(.vmid == {{.VMID}}) | .node')
+        VM_NODE=$({{._RESOLVE_NODE}} '.data[] | select(.vmid == {{.VMID}}) | .node')
         [ -z "$VM_NODE" ] || [ "$VM_NODE" = "null" ] && echo "VMID {{.VMID}} not found" && exit 1
 
         echo "Force-stopping VMID {{.VMID}} on $VM_NODE..."
@@ -222,10 +222,7 @@ tasks:
     prompt: "PERMANENTLY DELETE VMID {{.VMID}} and all its disks?"
     cmds:
       - |
-        VM_INFO=$(curl -sk \
-          -H "Authorization: {{.PVE_AUTH}}" \
-          "{{.PVE_API}}/cluster/resources?type=vm" \
-          | jq -r '.data[] | select(.vmid == {{.VMID}}) | "\(.node) \(.status)"')
+        VM_INFO=$({{._RESOLVE_NODE}} '.data[] | select(.vmid == {{.VMID}}) | "\(.node) \(.status)"')
         VM_NODE=$(echo "$VM_INFO" | awk '{print $1}')
         VM_STATUS=$(echo "$VM_INFO" | awk '{print $2}')
         [ -z "$VM_NODE" ] || [ "$VM_NODE" = "null" ] && echo "VMID {{.VMID}} not found" && exit 1
@@ -262,10 +259,7 @@ tasks:
       DISK: '{{.DISK | default "scsi0"}}'
     cmds:
       - |
-        VM_NODE=$(curl -sk \
-          -H "Authorization: {{.PVE_AUTH}}" \
-          "{{.PVE_API}}/cluster/resources?type=vm" \
-          | jq -r '.data[] | select(.vmid == {{.VMID}}) | .node')
+        VM_NODE=$({{._RESOLVE_NODE}} '.data[] | select(.vmid == {{.VMID}}) | .node')
         [ -z "$VM_NODE" ] || [ "$VM_NODE" = "null" ] && echo "VMID {{.VMID}} not found" && exit 1
 
         echo "Resizing VMID {{.VMID}} disk {{.DISK}} by {{.SIZE}} on $VM_NODE..."
@@ -282,10 +276,7 @@ tasks:
       vars: [VMID]
     cmds:
       - |
-        VM_NODE=$(curl -sk \
-          -H "Authorization: {{.PVE_AUTH}}" \
-          "{{.PVE_API}}/cluster/resources?type=vm" \
-          | jq -r '.data[] | select(.vmid == {{.VMID}}) | .node')
+        VM_NODE=$({{._RESOLVE_NODE}} '.data[] | select(.vmid == {{.VMID}}) | .node')
         [ -z "$VM_NODE" ] || [ "$VM_NODE" = "null" ] && echo "VMID {{.VMID}} not found" && exit 1
 
         curl -sk \
@@ -300,10 +291,7 @@ tasks:
       vars: [VMID]
     cmds:
       - |
-        VM_NODE=$(curl -sk \
-          -H "Authorization: {{.PVE_AUTH}}" \
-          "{{.PVE_API}}/cluster/resources?type=vm" \
-          | jq -r '.data[] | select(.vmid == {{.VMID}}) | .node')
+        VM_NODE=$({{._RESOLVE_NODE}} '.data[] | select(.vmid == {{.VMID}}) | .node')
         [ -z "$VM_NODE" ] || [ "$VM_NODE" = "null" ] && echo "VMID {{.VMID}} not found" && exit 1
 
         # Build an array of --data-urlencode args to handle special chars
@@ -341,10 +329,7 @@ tasks:
       ONLINE: '{{.ONLINE | default "0"}}'
     cmds:
       - |
-        VM_NODE=$(curl -sk \
-          -H "Authorization: {{.PVE_AUTH}}" \
-          "{{.PVE_API}}/cluster/resources?type=vm" \
-          | jq -r '.data[] | select(.vmid == {{.VMID}}) | .node')
+        VM_NODE=$({{._RESOLVE_NODE}} '.data[] | select(.vmid == {{.VMID}}) | .node')
         [ -z "$VM_NODE" ] || [ "$VM_NODE" = "null" ] && echo "VMID {{.VMID}} not found" && exit 1
 
         if [ "$VM_NODE" = "{{.TARGET}}" ]; then
@@ -364,10 +349,19 @@ tasks:
     silent: true
     requires:
       vars: [UPID, NODE]
+    vars:
+      TIMEOUT: '{{.TIMEOUT | default "300"}}'
     cmds:
       - |
-        echo "Waiting for task on {{.NODE}}..."
+        echo "Waiting for task on {{.NODE}} (timeout: {{.TIMEOUT}}s)..."
+        ELAPSED=0
+        INTERVAL=3
         while true; do
+          if [ "$ELAPSED" -ge "{{.TIMEOUT}}" ]; then
+            echo ""
+            echo "ERROR: Timed out after {{.TIMEOUT}}s waiting for task on {{.NODE}}"
+            exit 1
+          fi
           RESULT=$(curl -sk \
             -H "Authorization: {{.PVE_AUTH}}" \
             "https://{{.NODE}}.{{.DOMAIN}}:8006/api2/json/nodes/{{.NODE}}/tasks/{{.UPID}}/status" \
@@ -376,15 +370,18 @@ tasks:
           EXIT=$(echo "$RESULT" | awk '{print $2}')
           if [ "$STATUS" = "stopped" ]; then
             if [ "$EXIT" = "OK" ]; then
+              echo ""
               echo "Task completed successfully"
             else
+              echo ""
               echo "Task failed: $EXIT"
               exit 1
             fi
             break
           fi
           printf "."
-          sleep 3
+          sleep $INTERVAL
+          ELAPSED=$((ELAPSED + INTERVAL))
         done
 
   # ---------------------------------------------------------------------------
@@ -406,6 +403,154 @@ tasks:
           tags=$(yq '.tags | join(", ")' "$f")
           printf "  %-20s type=%-8s cp=%s w=%s  tags=[%s]\n" "$name" "$type" "$cp_count" "$w_count" "$tags"
         done
+
+  pve:cluster:validate:
+    desc: Validate a cluster profile YAML against cluster-config.yaml conventions
+    silent: true
+    requires:
+      vars: [PROFILE]
+    cmds:
+      - |
+        PROFILE_FILE="{{.SKILL_DIR}}/clusters/{{.PROFILE}}.yaml"
+        CFG_FILE="{{.SKILL_DIR}}/cluster-config.yaml"
+        if [ ! -f "$PROFILE_FILE" ]; then
+          echo "Profile not found: $PROFILE_FILE"
+          exit 1
+        fi
+
+        ERRORS=0
+        WARNINGS=0
+
+        echo "Validating profile: {{.PROFILE}}"
+        echo "======================================="
+
+        # --- Required fields ---
+        echo ""
+        echo "=== Required Fields ==="
+        for field in name type template tags; do
+          val=$(yq ".$field" "$PROFILE_FILE")
+          if [ "$val" = "null" ] || [ -z "$val" ]; then
+            echo "  FAIL: Missing required field: $field"
+            ERRORS=$((ERRORS + 1))
+          else
+            echo "  OK:   $field = $val"
+          fi
+        done
+
+        # Check nodes.controlplane exists and has assignments
+        cp_count=$(yq '.nodes.controlplane.count // 0' "$PROFILE_FILE")
+        cp_assignments=$(yq '.nodes.controlplane.assignments | length' "$PROFILE_FILE")
+        if [ "$cp_count" = "0" ] || [ "$cp_count" = "null" ]; then
+          echo "  FAIL: nodes.controlplane.count must be > 0"
+          ERRORS=$((ERRORS + 1))
+        else
+          echo "  OK:   nodes.controlplane.count = $cp_count"
+        fi
+        if [ "$cp_assignments" -lt "$cp_count" ] 2>/dev/null; then
+          echo "  FAIL: nodes.controlplane.assignments has $cp_assignments entries but count is $cp_count"
+          ERRORS=$((ERRORS + 1))
+        fi
+
+        # --- VMID range validation ---
+        echo ""
+        echo "=== VMID Range Validation ==="
+        VM_RANGE=$(yq -r '.vmid_ranges.vms' "$CFG_FILE")
+        RANGE_MIN=$(echo "$VM_RANGE" | cut -d- -f1)
+        RANGE_MAX=$(echo "$VM_RANGE" | cut -d- -f2)
+        echo "  Allowed VM range: $RANGE_MIN - $RANGE_MAX"
+
+        ALL_VMIDS=""
+        # Collect controlplane VMIDs
+        for i in $(seq 0 $((cp_count - 1))); do
+          vmid=$(yq ".nodes.controlplane.assignments[$i].vmid" "$PROFILE_FILE")
+          if [ "$vmid" != "null" ] && [ -n "$vmid" ]; then
+            ALL_VMIDS="$ALL_VMIDS $vmid"
+            if [ "$vmid" -lt "$RANGE_MIN" ] || [ "$vmid" -gt "$RANGE_MAX" ]; then
+              echo "  FAIL: Controlplane VMID $vmid is outside allowed range ($RANGE_MIN-$RANGE_MAX)"
+              ERRORS=$((ERRORS + 1))
+            else
+              echo "  OK:   Controlplane VMID $vmid is within range"
+            fi
+          fi
+        done
+        # Collect worker VMIDs
+        w_count=$(yq '.nodes.workers.count // 0' "$PROFILE_FILE")
+        for i in $(seq 0 $((w_count - 1))); do
+          vmid=$(yq ".nodes.workers.assignments[$i].vmid" "$PROFILE_FILE")
+          if [ "$vmid" != "null" ] && [ -n "$vmid" ]; then
+            ALL_VMIDS="$ALL_VMIDS $vmid"
+            if [ "$vmid" -lt "$RANGE_MIN" ] || [ "$vmid" -gt "$RANGE_MAX" ]; then
+              echo "  FAIL: Worker VMID $vmid is outside allowed range ($RANGE_MIN-$RANGE_MAX)"
+              ERRORS=$((ERRORS + 1))
+            else
+              echo "  OK:   Worker VMID $vmid is within range"
+            fi
+          fi
+        done
+
+        # --- Duplicate VMID check ---
+        echo ""
+        echo "=== Duplicate VMID Check ==="
+        DUPES=$(echo "$ALL_VMIDS" | tr ' ' '\n' | sort | uniq -d | grep -v '^$')
+        if [ -n "$DUPES" ]; then
+          for d in $DUPES; do
+            echo "  FAIL: Duplicate VMID: $d"
+            ERRORS=$((ERRORS + 1))
+          done
+        else
+          echo "  OK:   No duplicate VMIDs"
+        fi
+
+        # --- Node name validation ---
+        echo ""
+        echo "=== Node Assignment Validation ==="
+        VALID_NODES=$(yq -r '.cluster.nodes[].name' "$CFG_FILE")
+        for i in $(seq 0 $((cp_count - 1))); do
+          node=$(yq ".nodes.controlplane.assignments[$i].node" "$PROFILE_FILE")
+          if [ "$node" != "null" ] && [ -n "$node" ]; then
+            if echo "$VALID_NODES" | grep -qx "$node"; then
+              echo "  OK:   Controlplane assignment [$i] -> $node"
+            else
+              echo "  FAIL: Controlplane assignment [$i] references unknown node '$node'"
+              echo "        Valid nodes: $(echo $VALID_NODES | tr '\n' ' ')"
+              ERRORS=$((ERRORS + 1))
+            fi
+          fi
+        done
+        for i in $(seq 0 $((w_count - 1))); do
+          node=$(yq ".nodes.workers.assignments[$i].node" "$PROFILE_FILE")
+          if [ "$node" != "null" ] && [ -n "$node" ]; then
+            if echo "$VALID_NODES" | grep -qx "$node"; then
+              echo "  OK:   Worker assignment [$i] -> $node"
+            else
+              echo "  FAIL: Worker assignment [$i] references unknown node '$node'"
+              echo "        Valid nodes: $(echo $VALID_NODES | tr '\n' ' ')"
+              ERRORS=$((ERRORS + 1))
+            fi
+          fi
+        done
+
+        # --- Template VMID exists (API check) ---
+        echo ""
+        echo "=== Template Existence Check ==="
+        TEMPLATE=$(yq '.template' "$PROFILE_FILE")
+        TMPL_NODE=$({{._RESOLVE_NODE}} ".data[] | select(.vmid == $TEMPLATE) | .node")
+        if [ -z "$TMPL_NODE" ] || [ "$TMPL_NODE" = "null" ]; then
+          echo "  FAIL: Template VMID $TEMPLATE not found in the cluster"
+          ERRORS=$((ERRORS + 1))
+        else
+          echo "  OK:   Template VMID $TEMPLATE exists on node $TMPL_NODE"
+        fi
+
+        # --- Summary ---
+        echo ""
+        echo "======================================="
+        if [ "$ERRORS" -gt 0 ]; then
+          echo "VALIDATION FAILED: $ERRORS error(s)"
+          exit 1
+        else
+          echo "VALIDATION PASSED: Profile '{{.PROFILE}}' is valid"
+        fi
 
   pve:cluster:status:
     desc: Show VMs belonging to a cluster profile
@@ -461,10 +606,7 @@ tasks:
         MEMORY=$(yq '.nodes.controlplane.memory' "$PROFILE_FILE")
 
         # Resolve template node
-        TMPL_NODE=$(curl -sk \
-          -H "Authorization: {{.PVE_AUTH}}" \
-          "{{.PVE_API}}/cluster/resources?type=vm" \
-          | jq -r ".data[] | select(.vmid == $TEMPLATE) | .node")
+        TMPL_NODE=$({{._RESOLVE_NODE}} ".data[] | select(.vmid == $TEMPLATE) | .node")
         [ -z "$TMPL_NODE" ] || [ "$TMPL_NODE" = "null" ] && echo "Template $TEMPLATE not found" && exit 1
         echo "Template $TEMPLATE is on $TMPL_NODE"
 
@@ -559,10 +701,7 @@ tasks:
           VMID=$(yq ".nodes.controlplane.assignments[$i].vmid" "$PROFILE_FILE")
 
           # Re-resolve node after migration
-          VM_NODE=$(curl -sk \
-            -H "Authorization: {{.PVE_AUTH}}" \
-            "{{.PVE_API}}/cluster/resources?type=vm" \
-            | jq -r ".data[] | select(.vmid == $VMID) | .node")
+          VM_NODE=$({{._RESOLVE_NODE}} ".data[] | select(.vmid == $VMID) | .node")
 
           echo "Resizing $NAME ($VMID) disk to $DISK_SIZE on $VM_NODE..."
           curl -sk -X PUT \
@@ -577,10 +716,7 @@ tasks:
           NAME=$(yq ".nodes.controlplane.assignments[$i].name" "$PROFILE_FILE")
           VMID=$(yq ".nodes.controlplane.assignments[$i].vmid" "$PROFILE_FILE")
 
-          VM_NODE=$(curl -sk \
-            -H "Authorization: {{.PVE_AUTH}}" \
-            "{{.PVE_API}}/cluster/resources?type=vm" \
-            | jq -r ".data[] | select(.vmid == $VMID) | .node")
+          VM_NODE=$({{._RESOLVE_NODE}} ".data[] | select(.vmid == $VMID) | .node")
 
           echo "Starting $NAME ($VMID) on $VM_NODE..."
           curl -sk -X POST \
@@ -654,22 +790,25 @@ tasks:
           fi
         done
 
-        # Wait for all to stop
+        # Wait for all to stop (use temp file to propagate status out of pipe subshell)
         echo "  Waiting for VMs to stop..."
+        STOP_STATUS=$(mktemp)
+        trap "rm -f $STOP_STATUS" EXIT
         for attempt in $(seq 1 30); do
-          ALL_STOPPED=true
+          echo "ok" > "$STOP_STATUS"
           echo "$VMS" | while read node vmid name status; do
             s=$(curl -sk \
               -H "Authorization: {{.PVE_AUTH}}" \
               "https://$node.{{.DOMAIN}}:8006/api2/json/nodes/$node/qemu/$vmid/status/current" \
               | jq -r '.data.status // "stopped"')
             if [ "$s" != "stopped" ]; then
-              ALL_STOPPED=false
+              echo "waiting" > "$STOP_STATUS"
             fi
           done
-          $ALL_STOPPED && break
+          [ "$(cat "$STOP_STATUS")" = "ok" ] && break
           sleep 2
         done
+        rm -f "$STOP_STATUS"
 
         # Delete all VMs
         echo ""

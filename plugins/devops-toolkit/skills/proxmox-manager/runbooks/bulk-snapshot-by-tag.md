@@ -3,6 +3,8 @@ name: bulk-snapshot-by-tag
 description: Create snapshots across all VMs matching a given tag
 image_type: none
 requires: [api]
+tested_with:
+  proxmox: "8.x"
 ---
 
 # Bulk Snapshot by Tag

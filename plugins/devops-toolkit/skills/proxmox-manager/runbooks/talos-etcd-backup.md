@@ -3,6 +3,10 @@ name: talos-etcd-backup
 description: Create, rotate, and restore etcd snapshots for Talos Kubernetes clusters
 image_type: none
 requires: [talosctl]
+tested_with:
+  talos: "1.9.x"
+  kubernetes: "1.32.x"
+  proxmox: "8.x"
 ---
 
 # etcd Snapshot Management

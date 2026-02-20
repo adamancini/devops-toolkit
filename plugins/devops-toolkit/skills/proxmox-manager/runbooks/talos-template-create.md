@@ -3,6 +3,10 @@ name: talos-template-create
 description: Create a PVE VM template from a Talos Linux nocloud image with baked-in extensions
 image_type: raw
 requires: [api, ssh]
+tested_with:
+  talos: "1.9.x"
+  kubernetes: "1.32.x"
+  proxmox: "8.x"
 ---
 
 # Create PVE Template from Talos Image

@@ -3,6 +3,8 @@ name: cluster-create
 description: Provision an entire cluster from a cluster profile, including VM creation, Talos bootstrap, and Flux CD setup
 image_type: none
 requires: [api, ssh, talosctl, flux]
+tested_with:
+  proxmox: "8.x"
 ---
 
 # Cluster Create
