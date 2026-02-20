@@ -28,6 +28,8 @@ knowledge-base/
     │   └── ansible-host-configuration.md
     ├── talos-linux/
     │   └── ...
+    ├── talos-proxmox-nocloud/
+    │   └── nocloud-boot-provisioning.md
     └── talos-terraform-proxmox/
         └── terraform-talos-ha-pattern.md
 ```
@@ -39,6 +41,7 @@ knowledge-base/
 | Kubernetes Networking | `reference/kubernetes-networking/` | Ingress controller migration, Traefik, Gateway API |
 | Proxmox Ansible Host Config | `reference/proxmox-ansible-host-config/` | Ansible role-based hypervisor configuration, network templating, desired-state management |
 | Talos Linux | `reference/talos-linux/` | Image cache, registry DDoS prevention, IMAGECACHE partition, registryd |
+| Talos Proxmox NoCloud | `reference/talos-proxmox-nocloud/` | Talos Linux nocloud/cloud-init boot on Proxmox: SMBIOS serial method, cicustom snippets, nocloud vs metal images, JYSK 3000-cluster scale pattern, known boot issues |
 | Talos Terraform Proxmox | `reference/talos-terraform-proxmox/` | Terraform-based Talos HA cluster on Proxmox, Cilium CNI, bpg/proxmox + siderolabs/talos providers |
 | Packer Talos Proxmox | `reference/packer-talos-proxmox/` | Packer-based Talos template creation using Image Factory API, CI/CD-friendly automation |
 
