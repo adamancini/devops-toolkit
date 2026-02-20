@@ -1,7 +1,7 @@
 ---
 name: proxmox-manager
-description: Use when managing Proxmox VE clusters, VMs, templates, snapshots, backups, storage, Talos Linux clusters, Ansible-driven provisioning, Taskfile-based workflows, or Proxmox host configuration automation.
-version: 0.9.0
+description: Use when the user mentions Proxmox, PVE, Talos, annarchy.net, fleet-infra, pve01/pve02/pve03, staging cluster, production cluster, or asks to "spin up staging", "tear down staging", "rebuild the cluster", "reprovision", "upgrade Talos", "upgrade Kubernetes", "check cluster health", "what VMs are running", "create a template for Talos", "generate factory schematic", "new Talos extension", "etcd backup", "generate machine configs", "per-node patches", "bootstrap etcd", "deploy the latest Talos", "run talos-provision-vms", "update talos-proxmox.yaml", "check API connectivity", "reverse proxy for proxmox", "evacuate node", "migrate VM", "manage snapshots", "task pve:*", "task talos:*", "task cluster:*", "talosctl", or any Proxmox VE cluster operations, VM lifecycle, template creation, Talos Linux operations, Ansible-driven provisioning, or Taskfile-based workflows.
+version: 0.10.0
 ---
 
 # Proxmox Manager Skill
@@ -10,21 +10,38 @@ You are an expert at managing Proxmox VE clusters, with deep knowledge of the Pr
 
 ## When to Use This Skill
 
-Invoke this skill when the user asks about:
+### Cluster Lifecycle (most common)
+- "Spin up staging" / "spin up production" / "deploy a new cluster"
+- "Tear down staging" / "destroy the cluster" / "clean up VMs"
+- "Rebuild staging" / "reprovision the cluster" / "start fresh"
+- "Check if staging is healthy" / "cluster status" / "what's running"
+- "What VMs are on annarchy.net" / "list VMs" / "show templates"
+
+### Talos Operations
+- "Upgrade Talos from X to Y" / "upgrade Kubernetes" / "rolling upgrade"
+- "Deploy the latest Talos to staging" / "create a template for Talos 1.x"
+- "Generate factory schematic" / "add extension to Talos" / "new Talos image"
+- "Generate machine configs" / "create per-node patches" / "apply Talos config"
+- "Bootstrap etcd" / "etcd backup before upgrade" / "talosctl health"
+- "Image cache for air-gapped" / "Talos maintenance mode" / "IP discovery"
+
+### VM Management
 - Creating, starting, stopping, deleting, or resizing VMs
-- Creating VM templates from cloud images, ISOs, or pre-built disk images
+- Creating VM templates from cloud images, ISOs, qcow2, or Packer builds
 - Migrating VMs between nodes or evacuating a node
-- Checking cluster, node, or VM status and health
 - Managing storage, ISOs, snapshots, and backups
 - Bulk operations on VMs by tag
-- Spinning up or tearing down entire clusters
-- Bootstrapping Proxmox API credentials
-- Ingesting new operational procedures from URLs or instructions
-- Talos Linux cluster bootstrap, upgrade, or maintenance operations
-- Talos Image Factory builds and image cache creation
-- Ansible-driven VM provisioning or host configuration automation
-- Taskfile cluster workflows (`task cluster:deploy`, `task cluster:teardown`)
-- Packer-based template creation
+
+### Fleet-Infra Integration
+- "Run talos-provision-vms playbook" / "update talos-proxmox.yaml"
+- "Update fleet-infra vars" / "Ansible provisioning"
+- "Flux bootstrap" / "GitOps setup for the cluster"
+
+### Infrastructure
+- "Check API connectivity" / "task pve:check"
+- "Bootstrap Proxmox credentials" / "RBAC setup"
+- "Reverse proxy for Proxmox" / "HAProxy for PVE"
+- Host configuration automation (network, repos, certs, NTP)
 
 ## Cluster Configuration
 

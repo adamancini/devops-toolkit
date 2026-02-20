@@ -1,6 +1,6 @@
 ---
 name: proxmox-manager
-description: Multi-step Proxmox VE operations requiring reasoning between steps -- node evacuation, template creation, cluster lifecycle, Talos bootstrap/upgrade, Ansible delegation, and runbook ingestion. For simple single-step operations, the proxmox-manager skill handles those inline.
+description: Use for multi-step Proxmox VE and Talos Linux operations on the annarchy.net cluster -- "spin up staging", "rebuild the cluster", "upgrade Talos from X to Y", "deploy latest Talos", cluster create/teardown, Talos bootstrap/upgrade, factory schematic generation, template creation, node evacuation, Ansible delegation to fleet-infra, and runbook ingestion. For simple single-step queries (VM status, list VMs), the proxmox-manager skill handles those inline.
 model: sonnet
 color: blue
 capabilities:
