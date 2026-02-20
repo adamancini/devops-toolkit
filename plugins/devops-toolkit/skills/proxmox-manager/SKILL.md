@@ -323,7 +323,9 @@ curl -sk -X PUT \
 
 ### Task Polling
 
-Many operations (clone, migrate, backup) return a task UPID rather than completing synchronously. Poll for completion:
+Many operations (clone, migrate, backup, delete) return a task UPID rather than completing synchronously. **Always poll with a timeout** -- never wait indefinitely.
+
+**Single-shot status check:**
 
 ```bash
 curl -sk \
@@ -336,7 +338,41 @@ curl -sk \
 - `status == "stopped"` and `exitstatus == "OK"` -- task completed successfully
 - `status == "stopped"` and `exitstatus != "OK"` -- task failed; check `.data.exitstatus` for details
 
-Read task logs for debugging:
+**Polling loop with timeout (use this pattern for all async operations):**
+
+```bash
+poll_task() {
+  local node="$1" upid="$2" timeout="${3:-120}" interval="${4:-5}"
+  local elapsed=0
+  while [ "$elapsed" -lt "$timeout" ]; do
+    STATUS=$(curl -sk \
+      -H "Authorization: PVEAPIToken=$(pass show <PASS_PATH> | head -1)=$(pass show <PASS_PATH> | tail -1)" \
+      "https://$node.<CLUSTER_DOMAIN>:8006/api2/json/nodes/$node/tasks/$upid/status" \
+      | jq -r '.data.status')
+    if [ "$STATUS" = "stopped" ]; then
+      EXIT=$(curl -sk \
+        -H "Authorization: PVEAPIToken=$(pass show <PASS_PATH> | head -1)=$(pass show <PASS_PATH> | tail -1)" \
+        "https://$node.<CLUSTER_DOMAIN>:8006/api2/json/nodes/$node/tasks/$upid/status" \
+        | jq -r '.data.exitstatus')
+      if [ "$EXIT" = "OK" ]; then
+        echo "Task completed successfully"
+        return 0
+      else
+        echo "Task failed: $EXIT"
+        return 1
+      fi
+    fi
+    sleep "$interval"
+    elapsed=$((elapsed + interval))
+  done
+  echo "Task timed out after ${timeout}s (UPID: $upid)"
+  return 2
+}
+```
+
+Usage: `poll_task pve01 "UPID:pve01:..." 300 10` (300s timeout, 10s interval)
+
+**Read task logs for debugging stuck or failed tasks:**
 
 ```bash
 curl -sk \
@@ -344,6 +380,12 @@ curl -sk \
   "https://<NODE_HOST>:8006/api2/json/nodes/<NODE_NAME>/tasks/<UPID>/log?limit=50" \
   | jq '.data[] | .t'
 ```
+
+**When tasks hang:**
+- Check if the VM has a disk lock: `ssh <SSH_USER>@<NODE_HOST> 'qm unlock <VMID>'`
+- Check for pending snapshot merges: `ssh <SSH_USER>@<NODE_HOST> 'qm listsnapshot <VMID>'`
+- Check if a backup job is holding a lock: `ssh <SSH_USER>@<NODE_HOST> 'cat /run/lock/qemu-server/lock-<VMID>.conf'`
+- If a task is truly stuck, the UPID contains the PID -- check if the process is alive: `ssh <SSH_USER>@<NODE_HOST> 'ps -p <PID>'`
 
 ### Migration
 
@@ -891,6 +933,7 @@ nodes:
         node: pve01                  # Target Proxmox node
         vmid: 1031                   # Explicit VMID
         ip: 10.0.0.31               # Static IP address
+        mac: "02:54:00:00:00:31"    # Deterministic MAC (optional, for IP discovery)
   workers:
     count: 0                         # Number of worker nodes (0 = none)
     name_prefix: k0w
@@ -1025,6 +1068,11 @@ Rolling upgrades for Talos OS and Kubernetes. See `runbooks/talos-upgrade.md`.
 
 **Order:** Always upgrade Kubernetes first, then Talos OS.
 
+**In-place vs template-based upgrades:**
+- `talosctl upgrade` (in-place) is for **minor/patch** Talos OS upgrades within the same extension set
+- For **major version upgrades**, new factory images, or extension changes: create a new PVE template from the updated factory image, tear down old VMs, and redeploy from the new template. See `runbooks/talos-version-upgrade.md`.
+- **Never attempt to upgrade VMs in-place when the factory image or extension set has changed.** Talos's immutable design makes template-based redeployment the natural upgrade path for these cases.
+
 ### Day-2 Operations
 
 **etcd backups:** See `runbooks/talos-etcd-backup.md`. Take snapshots before upgrades and on a regular schedule. Store off-cluster.
@@ -1066,6 +1114,22 @@ Key architecture:
 ## Ansible Integration
 
 For multi-node orchestration, delegate to existing Ansible playbooks in the fleet-infra repository. The repository path and inventory are defined in the `ansible` section of `cluster-config.yaml`. The skill does **not** modify Ansible playbooks or inventory files -- it is a consumer of existing automation, not an editor.
+
+### Prerequisites
+
+The Proxmox Ansible playbooks require the `community.proxmox` collection (not the deprecated built-in `proxmox_kvm` module):
+
+```bash
+ansible-galaxy collection install community.proxmox
+```
+
+**Module name:** `community.proxmox.proxmox_kvm` (not `proxmox_kvm`)
+
+**API token format for Ansible** (differs from the curl `PVEAPIToken` header format):
+- `api_token_id`: `user@pve!tokenname` (same as line 1 of the `pass` entry)
+- `api_token_secret`: the UUID secret (same as line 2 of the `pass` entry)
+
+These are passed as separate fields in the module, not combined into a single header string.
 
 ### General Delegation Pattern
 
@@ -1353,3 +1417,21 @@ Tasks that destroy data require interactive confirmation:
 - The custom role may be missing a required privilege
 - Check current role: `ssh <SSH_USER>@<NODE_HOST> 'pveum role list --output-format json' | jq '.[] | select(.roleid == "<ROLE_NAME>")'`
 - Add missing privileges: `ssh <SSH_USER>@<NODE_HOST> 'pveum role modify <ROLE_NAME> --privs "existing+new"'`
+- **After initial RBAC bootstrap:** If the connectivity check (`task pve:check`) returns 200, do not re-question permissions unless a specific 403 response is returned. If the user states permissions are configured, trust them -- only investigate permissions when a 403 response includes a specific `PVE::Exception` message naming the missing privilege.
+
+### VM Operations Hang Indefinitely
+- **Check for disk locks:** `ssh <SSH_USER>@<NODE_HOST> 'qm unlock <VMID>'`
+- **Check for pending snapshot merges:** `ssh <SSH_USER>@<NODE_HOST> 'qm listsnapshot <VMID>'`
+- **Check for backup jobs holding locks:** `ssh <SSH_USER>@<NODE_HOST> 'ls /run/lock/qemu-server/'`
+- **Verify the task process is alive:** Extract the PID from the UPID string and check `ps -p <PID>` on the node
+- **For graceful shutdown timeouts:** Talos VMs without qemu-guest-agent will not respond to ACPI shutdown. Use `stop` (force) instead of `shutdown` (graceful) for Talos nodes in maintenance mode.
+
+### HAProxy Reverse Proxy for Proxmox
+- **Redirect loops on pve.annarchy.net:** pveproxy redirects HTTP to HTTPS internally. Use TCP passthrough mode with SNI routing (not TLS termination) to avoid redirect loops. See `runbooks/proxmox-reverse-proxy.md`.
+- **Intermittent 503 errors on VM console page:** pveproxy has limited worker processes. Tune `/etc/default/pveproxy` with `WORKERS=4` or higher. WebSocket connections (VNC/SPICE console) hold workers for the duration of the session.
+- **Session stickiness required:** The Proxmox GUI maintains session state per backend node. Configure HAProxy with sticky sessions (cookie or source-IP affinity) for the Proxmox backend.
+
+### Talos Maintenance Mode Discovery
+- **Nodes unreachable at expected static IPs:** Talos boots into maintenance mode with DHCP, not the configured static IP. Scan the subnet for port 50000 to find nodes. See step 5 of `runbooks/talos-cluster-bootstrap.md`.
+- **MAC-based matching:** Query Proxmox API for the VM's `net0` MAC address, then use `talosctl get links --insecure` on discovered IPs to match.
+- **Version mismatch (talosctl client vs server):** Ensure the local `talosctl` binary version matches or is newer than the target Talos cluster version. Use `talosctl version --client` to check.

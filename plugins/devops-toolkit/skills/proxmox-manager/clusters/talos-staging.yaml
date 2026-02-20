@@ -39,14 +39,17 @@ nodes:
         node: pve01
         vmid: 1051
         ip: 10.0.0.51
+        mac: "02:54:00:00:01:51"
       - name: ts02
         node: pve02
         vmid: 1052
         ip: 10.0.0.52
+        mac: "02:54:00:00:01:52"
       - name: ts03
         node: pve03
         vmid: 1053
         ip: 10.0.0.53
+        mac: "02:54:00:00:01:53"
   workers:
     count: 0
     name_prefix: tw

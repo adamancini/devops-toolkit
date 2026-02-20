@@ -148,12 +148,12 @@ This runbook covers the full Talos bootstrap procedure after VMs are provisioned
 
 5. **Node discovery -- resolve DHCP IPs to expected nodes** (local)
 
-   When VMs boot from a Talos template, they acquire DHCP addresses in maintenance mode. Before applying static configs, you must discover which IP corresponds to which expected node. Skip this step if all node IPs are already known (e.g., static DHCP reservations or prior assignment).
+   **Why this step exists:** Talos boots into maintenance mode using DHCP, not the static IPs configured in machine patches. The nodes are reachable on port 50000 (Talos maintenance API) but at unpredictable DHCP-assigned addresses. You must discover which DHCP IP corresponds to which expected node before applying configs. Skip this step only if you have static DHCP reservations that guarantee the expected IPs.
 
-   **Scan the subnet for Talos maintenance-mode nodes:**
+   **Step 5a: Scan the subnet for Talos maintenance-mode nodes:**
 
    ```bash
-   # Scan the expected subnet for port 50000 (Talos API in maintenance mode)
+   # Parallel scan of the expected subnet for port 50000
    SUBNET="10.0.0"
    for i in $(seq 1 254); do
      (nc -z -w 1 "$SUBNET.$i" 50000 2>/dev/null && echo "$SUBNET.$i") &
@@ -161,49 +161,67 @@ This runbook covers the full Talos bootstrap procedure after VMs are provisioned
    wait
    ```
 
-   Expected result: A list of IPs running the Talos maintenance API. These are your newly provisioned nodes.
-
-   **Match discovered IPs to expected nodes via MAC address (Proxmox API):**
+   For larger subnets (e.g., /23), scan both octets and throttle to avoid overwhelming the network:
 
    ```bash
-   # Get MAC addresses from Proxmox VM configs
+   batch=0
+   for octet3 in 0 1; do
+     for octet4 in $(seq 1 254); do
+       ip="10.0.${octet3}.${octet4}"
+       (nc -z -w 1 "$ip" 50000 2>/dev/null && echo "$ip") &
+       batch=$((batch + 1))
+       [ $((batch % 50)) -eq 0 ] && wait
+     done
+   done
+   wait
+   ```
+
+   Expected result: A list of IPs running the Talos maintenance API. The count should match the number of VMs provisioned. If fewer are found, wait 30 seconds and retry -- some nodes may still be booting.
+
+   **Step 5b: Build expected MAC map**
+
+   If the cluster profile includes `mac` fields in node assignments (e.g., `mac: "02:54:00:00:01:51"`), use those as expected MACs directly. Otherwise, query the Proxmox API for each VM's `net0` MAC:
+
+   ```bash
    for vmid in <CP_VMID1> <CP_VMID2> <CP_VMID3>; do
-     INFO=$(curl -sk \
+     PVE_NODE=$(curl -sk \
        -H "Authorization: PVEAPIToken=$(pass show <PASS_PATH> | head -1)=$(pass show <PASS_PATH> | tail -1)" \
        "https://<NODE_HOST>:8006/api2/json/cluster/resources?type=vm" \
        | jq -r ".data[] | select(.vmid == $vmid) | .node")
      MAC=$(curl -sk \
        -H "Authorization: PVEAPIToken=$(pass show <PASS_PATH> | head -1)=$(pass show <PASS_PATH> | tail -1)" \
-       "https://$INFO.<CLUSTER_DOMAIN>:8006/api2/json/nodes/$INFO/qemu/$vmid/config" \
-       | jq -r '.data.net0' | grep -oE '([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}')
-     echo "VMID $vmid: MAC=$MAC"
+       "https://$PVE_NODE.<CLUSTER_DOMAIN>:8006/api2/json/nodes/$PVE_NODE/qemu/$vmid/config" \
+       | jq -r '.data.net0' | grep -oiE '([0-9a-f]{2}:){5}[0-9a-f]{2}')
+     echo "VMID $vmid: expected MAC=$MAC"
    done
    ```
 
-   Then compare MACs against the discovered IPs using `talosctl get links`:
+   **Step 5c: Match discovered IPs to expected nodes via MAC**
+
+   Read the MAC from each discovered IP using `talosctl get links`:
 
    ```bash
    for ip in <DISCOVERED_IPS>; do
      MAC=$(talosctl --nodes "$ip" --endpoints "$ip" get links --insecure -o json 2>/dev/null \
        | jq -r 'select(.spec.kind == "ether" and .spec.operationalState == "up") | .spec.hardwareAddr' \
        | head -1)
-     echo "$ip: MAC=$MAC"
+     echo "$ip: discovered MAC=$MAC"
    done
    ```
 
-   Match the MACs from Proxmox to the MACs from talosctl to build the IP-to-node mapping.
+   Match Proxmox/profile MACs to discovered MACs to build the mapping: `{node_name: dhcp_ip}`.
 
-   **Fallback -- count-based matching:**
+   **Step 5d: Fallback -- count-based matching:**
 
-   If MAC lookup is unavailable (e.g., talosctl `get links` not supported in maintenance mode), use a count-based approach:
+   If MAC lookup fails (e.g., `talosctl get links` not supported in some maintenance mode versions):
 
    1. Sort discovered IPs numerically
    2. Assign them to nodes in the same order as the profile's `assignments` list
-   3. Verify the count matches the expected number of nodes
+   3. **Count-based matching is only safe when the discovered count exactly equals the expected count.** If there are extra maintenance-mode nodes on the subnet (e.g., from another cluster), count-based matching is ambiguous and MAC matching is required.
 
-   **Update node patches with discovered IPs:**
+   **Step 5e: Apply configs using discovered IPs:**
 
-   If the discovered IPs differ from the profile's `assignments[].ip`, update the per-node patches (step 4) with the actual DHCP addresses before applying static config. After applying config with the correct static IPs, the nodes will reboot with their intended addresses.
+   In step 6 below, use the discovered DHCP IP (not the profile's static IP) as the `--nodes` target for `talosctl apply-config`. The machine config patch contains the correct static IP, so after applying, the node reboots with its intended address.
 
 6. **Apply configs to control plane nodes** (local)
 
