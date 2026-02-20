@@ -32,6 +32,7 @@ knowledge-base/
 |-------|------|----------|
 | Kubernetes Networking | `reference/kubernetes-networking/` | Ingress controller migration, Traefik, Gateway API |
 | Proxmox Ansible Host Config | `reference/proxmox-ansible-host-config/` | Ansible role-based hypervisor configuration, network templating, desired-state management |
+| Talos Linux | `reference/talos-linux/` | Image cache, registry DDoS prevention, IMAGECACHE partition, registryd |
 
 ## How to Use References
 
