@@ -1,7 +1,7 @@
 ---
 name: proxmox-manager
-description: Use when the user asks to "create a proxmox VM", "make a VM template", "migrate VM", "check proxmox status", "evacuate node", "manage proxmox snapshots", "import cloud image", "spin up a cluster", "tear down cluster", "check node health", "list VMs", "clone template", "upload ISO", "manage proxmox storage", "create proxmox API token", "bootstrap proxmox credentials", "bootstrap talos cluster", "deploy talos", "upgrade talos", "talos maintenance mode", "talos IP discovery", "apply talos config", "generate talos secrets", "talos image factory", "provision VMs", "run provisioning playbook", "talos-provision-vms", "ansible proxmox", "task cluster:deploy", "task cluster:teardown", "task cluster:status", "create VM template", "node maintenance", or mentions Proxmox VE cluster operations, VM lifecycle management, template creation, node maintenance, cluster provisioning, Talos Linux cluster operations, Ansible-driven VM provisioning, or Taskfile-based cluster workflows.
-version: 0.7.0
+description: Use when the user asks to "create a proxmox VM", "make a VM template", "migrate VM", "check proxmox status", "evacuate node", "manage proxmox snapshots", "import cloud image", "spin up a cluster", "tear down cluster", "check node health", "list VMs", "clone template", "upload ISO", "manage proxmox storage", "create proxmox API token", "bootstrap proxmox credentials", "bootstrap talos cluster", "deploy talos", "upgrade talos", "talos maintenance mode", "talos IP discovery", "apply talos config", "generate talos secrets", "talos image factory", "talos image cache", "cache container images", "air-gapped talos", "provision VMs", "run provisioning playbook", "talos-provision-vms", "ansible proxmox", "task cluster:deploy", "task cluster:teardown", "task cluster:status", "create VM template", "node maintenance", or mentions Proxmox VE cluster operations, VM lifecycle management, template creation, node maintenance, cluster provisioning, Talos Linux cluster operations, Ansible-driven VM provisioning, Taskfile-based cluster workflows, or Ansible-based host configuration automation.
+version: 0.8.0
 ---
 
 # Proxmox Manager Skill
@@ -23,10 +23,13 @@ Invoke this skill when the user asks about:
 - Talos Linux cluster bootstrap, upgrade, or maintenance operations
 - Generating Talos secrets, machine configs, or config patches
 - Talos Image Factory builds (schematic creation, extension selection)
+- Talos image cache creation (pre-caching container images for air-gapped/large-scale deployments)
 - Talos node discovery (scanning for maintenance-mode nodes, IP resolution)
 - Ansible-driven VM provisioning (`talos-provision-vms.yaml` or similar playbooks)
 - Taskfile cluster workflows (`task cluster:deploy`, `task cluster:teardown`, `task cluster:status`)
 - Node maintenance mode operations (evacuation, rolling reboots)
+- Ansible-based host configuration automation (network, repos, certs, NTP, monitoring, user management)
+- Preventing configuration drift across Proxmox nodes at scale
 
 ## Cluster Configuration
 
@@ -967,6 +970,24 @@ Talos Image Factory (`factory.talos.dev`) builds custom images with system exten
 - Template image: `factory.talos.dev/image/<SCHEMATIC_ID>/v<VERSION>/nocloud-amd64.raw.xz`
 - Upgrade installer: `factory.talos.dev/installer/<SCHEMATIC_ID>:v<VERSION>`
 
+### Image Cache
+
+Talos supports a local image cache that stores container images on-disk within a dedicated IMAGECACHE partition. At boot, a `registryd` service serves images from this cache on `127.0.0.1`, eliminating external registry pulls. This is critical for:
+- **Air-gapped environments** where nodes cannot reach external registries
+- **Bandwidth-limited edge** where repeated pulls are expensive
+- **Large-scale deployments** (100+ clusters) where simultaneous pulls DDoS the registry
+
+The cache is built at image creation time using `talosctl images cache-create` and embedded via the Talos imager's `--image-cache` flag. It must be enabled in the machine config before bootstrap:
+
+```yaml
+machine:
+  features:
+    imageCache:
+      localEnabled: true
+```
+
+Without this config, Talos automatically removes the IMAGECACHE partition. See `runbooks/talos-image-cache.md` for the full procedure.
+
 ### Template Creation
 
 Create PVE templates from Talos factory images. See `runbooks/talos-template-create.md`.
@@ -1134,6 +1155,110 @@ Common host patterns:
 | `pve*` | All Proxmox hosts |
 | `k0s01,k0s02` | Specific nodes by name |
 | `all:!workers` | Everything except workers |
+
+## Host Configuration Automation
+
+While the Ansible Integration section above covers **VM provisioning** playbooks, this section addresses **hypervisor host configuration** -- ensuring every Proxmox node has consistent network, repository, certificate, NTP, monitoring, and user management settings. This prevents configuration drift across large clusters.
+
+### Architecture: Role-Based Desired State
+
+Host configuration uses a modular Ansible role architecture where each configuration domain is an independent role. A top-level role list controls which domains are active:
+
+```yaml
+# defaults/main.yml -- toggle roles on/off
+roles:
+  - network
+  - repositories
+  - certificates
+  - ntp
+  - monitoring
+  - notifications
+  - certbot
+  - usermgmt
+```
+
+Comment out a role to disable it. The main playbook dynamically includes enabled roles:
+
+```yaml
+---
+- hosts: all
+  gather_facts: true
+  tasks:
+    - name: Include roles
+      include_vars: defaults/main.yml
+
+    - name: Include {{ roles | length }} role(s)
+      include_role:
+        name: "{{ role.split('#')[0] }}"
+        tasks_from: "{{ role.split('#')[1] | default('main') }}"
+      with_items: "{{ roles }}"
+      loop_control:
+        loop_var: role
+```
+
+The `role.split('#')` pattern allows targeting specific task files within a role (e.g., `network#vlans` runs `roles/network/tasks/vlans.yml`).
+
+### Configuration Domains
+
+| Role | Purpose |
+|------|---------|
+| `network` | Bridge/interface configuration, VLAN-aware bridges, management + trunk interfaces |
+| `repositories` | APT repository management (enterprise/no-subscription, Ceph) |
+| `certificates` | SSL/TLS certificate deployment for Proxmox web UI |
+| `ntp` | Time synchronization (chrony/systemd-timesyncd) |
+| `monitoring` | Monitoring agent installation and configuration |
+| `notifications` | Alert/notification channel setup |
+| `certbot` | Let's Encrypt certificate automation |
+| `usermgmt` | Host-level user/group/permission management |
+
+### Network Configuration Pattern
+
+The network role uses a data-driven approach with Jinja2 templating:
+
+**Data definition** (`roles/network/defaults/main.yml`):
+
+```yaml
+networkfacts:
+  - mgmt:
+    type: mgmt
+    bridge: vmbr0
+    int: [ens192]
+    intmode: manual
+    bridgemode: static
+    ipaddress: "192.168.100.10/24"
+    gateway: "192.168.100.1"
+  - trunk:
+    bridge: vmbr1
+    int: [ens224]
+    type: trunk
+    intmode: manual
+    bridgemode: static
+```
+
+**Jinja2 template** (`roles/network/templates/networkconfig.j2`) generates `/etc/network/interfaces` from the data, handling management interfaces (with IP) and trunk interfaces (VLAN-aware bridges with `bridge-vids 2-4094`).
+
+**Task** applies the template:
+
+```yaml
+- name: Create network resources
+  template:
+    src: "../templates/networkconfig.j2"
+    dest: "/etc/network/interfaces"
+```
+
+### When to Use Host Configuration Automation
+
+| Use host config automation when... | Use the Proxmox API when... |
+|-------------------------------------|------------------------------|
+| Onboarding new Proxmox nodes | Creating/managing VMs |
+| Enforcing consistent network bridges across nodes | Configuring individual VM settings |
+| Managing host-level certificates and repos | Cloning templates, migrating VMs |
+| Recovering from host reinstallation | Cluster lifecycle (create/teardown) |
+| Preventing configuration drift at scale | Single-node status checks |
+
+### Reference
+
+Full reference material with all code examples and implementation details is available in the knowledge base at `skills/knowledge-base/reference/proxmox-ansible-host-config/ansible-host-configuration.md`.
 
 ## Taskfile CLI
 

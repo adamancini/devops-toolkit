@@ -1,6 +1,6 @@
 ---
 name: proxmox-manager
-description: Use this agent when you need to perform multi-step Proxmox VE operations that require reasoning between steps. This includes node evacuation (query VMs, plan placement, migrate in sequence, verify), template creation from external sources (fetch instructions, adapt to cluster conventions, execute), cluster lifecycle management (parallel VM creation, Talos bootstrap, Flux setup), Talos Linux cluster operations (image factory builds, cluster bootstrap, rolling OS/K8s upgrades, etcd backup/restore, node IP discovery, maintenance mode workflows), Ansible-driven VM provisioning (delegating to talos-provision-vms or other fleet-infra playbooks), Taskfile-based cluster workflows (task cluster:deploy, task cluster:teardown, task cluster:status), and runbook ingestion (fetch URL, adapt procedures, write runbook files). For simple single-step operations (check status, start a VM, list templates), the proxmox-manager skill handles those inline without needing this agent.
+description: Use this agent when you need to perform multi-step Proxmox VE operations that require reasoning between steps. This includes node evacuation (query VMs, plan placement, migrate in sequence, verify), template creation from external sources (fetch instructions, adapt to cluster conventions, execute), cluster lifecycle management (parallel VM creation, Talos bootstrap, Flux setup), Talos Linux cluster operations (image factory builds, image cache creation for air-gapped/large-scale deployments, cluster bootstrap, rolling OS/K8s upgrades, etcd backup/restore, node IP discovery, maintenance mode workflows), Ansible-driven VM provisioning (delegating to talos-provision-vms or other fleet-infra playbooks), Taskfile-based cluster workflows (task cluster:deploy, task cluster:teardown, task cluster:status), runbook ingestion (fetch URL, adapt procedures, write runbook files), and Ansible-based host configuration automation (rolling out network, repository, certificate, NTP, monitoring, and user management configs across Proxmox nodes). For simple single-step operations (check status, start a VM, list templates), the proxmox-manager skill handles those inline without needing this agent.
 model: sonnet
 color: blue
 skills: proxmox-manager
@@ -66,10 +66,11 @@ When the user provides a URL or instructions for a new procedure:
 ### Talos Cluster Lifecycle
 Full workflow from image to running cluster -- read `runbooks/talos-*.md` for detailed procedures:
 1. **Image Factory:** Build custom Talos image with extensions via `factory.talos.dev` (`talos-image-factory.md`)
-2. **Template creation:** Import factory image as PVE template (`talos-template-create.md`)
-3. **VM provisioning:** Clone template, configure, migrate, resize, start (handled by `pve:cluster:create`)
-4. **Bootstrap:** Generate secrets, machine configs, per-node patches, apply configs, bootstrap etcd (`talos-cluster-bootstrap.md`)
-5. **Verification:** `talosctl health`, `kubectl get nodes`, verify extensions
+2. **Image Cache (optional):** Pre-cache container images into the disk image for air-gapped or large-scale deployments (`talos-image-cache.md`). Uses `talosctl images cache-create` + imager `--image-cache` flag. Requires `machine.features.imageCache.localEnabled: true` in machine config.
+3. **Template creation:** Import factory image (or cached image) as PVE template (`talos-template-create.md`)
+4. **VM provisioning:** Clone template, configure, migrate, resize, start (handled by `pve:cluster:create`)
+5. **Bootstrap:** Generate secrets, machine configs, per-node patches, apply configs, bootstrap etcd (`talos-cluster-bootstrap.md`)
+6. **Verification:** `talosctl health`, `kubectl get nodes`, verify extensions, verify `registryd` if using image cache
 
 ### Talos Upgrades
 Rolling upgrades with zero-downtime -- read `runbooks/talos-upgrade.md`:
@@ -100,6 +101,16 @@ For operations already covered by fleet-infra playbooks, delegate rather than re
 - Construct commands using paths from `cluster-config.yaml`
 
 The skill does not modify Ansible playbooks or inventory files.
+
+### Host Configuration Automation
+
+For hypervisor-level configuration (network bridges, repositories, certificates, NTP, monitoring, user management), refer to the "Host Configuration Automation" section in the SKILL.md. Key patterns:
+
+1. **Role-based architecture** -- each config domain is an independent Ansible role, toggled via a top-level role list
+2. **Dynamic role inclusion** -- main playbook includes roles from `defaults/main.yml` with `role.split('#')` for task-specific targeting
+3. **Jinja2 network templating** -- data-driven `/etc/network/interfaces` generation from `networkfacts` variable
+4. **Desired-state enforcement** -- reapply to fix drift, onboard new nodes, or recover from reinstallation
+5. **Dry-run validation** -- use `--check --diff` before applying network changes to production nodes
 
 ## Error Handling
 

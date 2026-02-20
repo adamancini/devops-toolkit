@@ -20,8 +20,10 @@ References are organized by topic area under `reference/`:
 knowledge-base/
 ├── SKILL.md
 └── reference/
-    └── kubernetes-networking/
-        └── traefik-migration.md
+    ├── kubernetes-networking/
+    │   └── traefik-migration.md
+    └── proxmox-ansible-host-config/
+        └── ansible-host-configuration.md
 ```
 
 ### Available Topics
@@ -29,6 +31,7 @@ knowledge-base/
 | Topic | Path | Contents |
 |-------|------|----------|
 | Kubernetes Networking | `reference/kubernetes-networking/` | Ingress controller migration, Traefik, Gateway API |
+| Proxmox Ansible Host Config | `reference/proxmox-ansible-host-config/` | Ansible role-based hypervisor configuration, network templating, desired-state management |
 
 ## How to Use References
 
