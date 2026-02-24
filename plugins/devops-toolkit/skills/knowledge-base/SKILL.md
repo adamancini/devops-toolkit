@@ -26,6 +26,8 @@ knowledge-base/
     │   └── packer-talos-image-factory.md
     ├── proxmox-ansible-host-config/
     │   └── ansible-host-configuration.md
+    ├── macos-disk-space-snapshots/
+    │   └── time-machine-local-snapshots.md
     ├── proxmox-letsencrypt-gcloud/
     │   └── letsencrypt-gcloud-dns.md
     ├── talos-linux/
@@ -47,6 +49,7 @@ knowledge-base/
 | Talos Terraform Proxmox | `reference/talos-terraform-proxmox/` | Terraform-based Talos HA cluster on Proxmox, Cilium CNI, bpg/proxmox + siderolabs/talos providers |
 | Packer Talos Proxmox | `reference/packer-talos-proxmox/` | Packer-based Talos template creation using Image Factory API, CI/CD-friendly automation |
 | Proxmox Let's Encrypt gcloud | `reference/proxmox-letsencrypt-gcloud/` | Let's Encrypt ACME DNS-01 challenge via Google Cloud DNS on Proxmox VE, service account auth, DNS delegation pattern |
+| macOS Disk Space / Snapshots | `reference/macos-disk-space-snapshots/` | Time Machine local snapshots causing full disk, APFS purgeable space, `tmutil` diagnosis and cleanup, Finder vs `df` discrepancy |
 
 ## How to Use References
 
