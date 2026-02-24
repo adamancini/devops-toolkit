@@ -26,6 +26,8 @@ knowledge-base/
     │   └── packer-talos-image-factory.md
     ├── proxmox-ansible-host-config/
     │   └── ansible-host-configuration.md
+    ├── proxmox-letsencrypt-gcloud/
+    │   └── letsencrypt-gcloud-dns.md
     ├── talos-linux/
     │   └── ...
     ├── talos-proxmox-nocloud/
@@ -44,6 +46,7 @@ knowledge-base/
 | Talos Proxmox NoCloud | `reference/talos-proxmox-nocloud/` | Talos Linux nocloud/cloud-init boot on Proxmox: SMBIOS serial method, cicustom snippets, nocloud vs metal images, JYSK 3000-cluster scale pattern, known boot issues |
 | Talos Terraform Proxmox | `reference/talos-terraform-proxmox/` | Terraform-based Talos HA cluster on Proxmox, Cilium CNI, bpg/proxmox + siderolabs/talos providers |
 | Packer Talos Proxmox | `reference/packer-talos-proxmox/` | Packer-based Talos template creation using Image Factory API, CI/CD-friendly automation |
+| Proxmox Let's Encrypt gcloud | `reference/proxmox-letsencrypt-gcloud/` | Let's Encrypt ACME DNS-01 challenge via Google Cloud DNS on Proxmox VE, service account auth, DNS delegation pattern |
 
 ## How to Use References
 

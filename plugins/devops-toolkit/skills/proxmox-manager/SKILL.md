@@ -146,6 +146,7 @@ See `runbooks/_template.md` for the standard format. Each runbook defines parame
 | `talos-etcd-backup.md` | etcd snapshot procedures |
 | `packer-talos-template.md` | Packer-based Talos template (CI/CD) |
 | `proxmox-reverse-proxy.md` | HAProxy reverse proxy for PVE web UI |
+| `letsencrypt-gcloud-dns.md` | Let's Encrypt via Google Cloud DNS-01 challenge |
 
 ### Ingesting New Runbooks
 
