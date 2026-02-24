@@ -58,14 +58,21 @@ For operations where steps are independent:
 | Talos upgrades | `runbooks/talos-upgrade.md` or `runbooks/talos-version-upgrade.md` |
 | RBAC bootstrap | `references/rbac-bootstrap.md` |
 | Ansible delegation | `references/ansible-integration.md` |
+| `pvesh` CLI usage | `references/pvesh-tool.md` |
+| API endpoint discovery | `pvesh usage <path> -v` on-node, or <https://pve.proxmox.com/pve-docs/api-viewer/> |
 | New procedure ingestion | `runbooks/_template.md` (write new runbook) |
 
 ## Execution Preferences
 
 - **API over SSH** when both can accomplish the task
+- **`pvesh` over raw `curl`** when running commands via SSH on a PVE node (simpler syntax, no auth headers, human-readable output). See `references/pvesh-tool.md`
 - **Taskfile tasks** for common operations (they handle node resolution and safety prompts)
 - **Runbooks** for multi-step procedures (they encode the full workflow)
-- **Direct API** when fine-grained control or custom logic is needed
+- **Direct API (`curl`)** when running from workstation or when fine-grained control is needed
+
+### Official API Reference
+
+**Source of truth:** <https://pve.proxmox.com/pve-docs/api-viewer/> -- the canonical, auto-generated reference for every PVE endpoint, parameter, return type, and permission. Consult when reference files lack detail on a specific endpoint.
 
 ## Error Handling
 

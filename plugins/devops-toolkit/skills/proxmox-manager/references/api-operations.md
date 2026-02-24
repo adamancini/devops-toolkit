@@ -1,5 +1,22 @@
 # Core API Operations Reference
 
+## Official API Documentation
+
+**Source of truth for the Proxmox VE API:**
+<https://pve.proxmox.com/pve-docs/api-viewer/>
+
+The API viewer is the canonical, auto-generated reference for every endpoint, parameter, return type, and permission requirement in the PVE REST API. When this reference file lacks detail on a specific endpoint or parameter, consult the API viewer.
+
+**On-node API discovery with pvesh:**
+```bash
+pvesh ls /                          # List top-level API paths
+pvesh usage /nodes/{node}/qemu -v   # Show endpoint parameters and types
+```
+
+See `references/pvesh-tool.md` for full pvesh documentation.
+
+---
+
 This reference provides concrete API endpoints and examples for common Proxmox VE operations. All examples use placeholders from `cluster-config.yaml`:
 - `<PASS_PATH>` -- `credentials.pass_path`
 - `<NODE_HOST>` -- any `cluster.nodes[].host`

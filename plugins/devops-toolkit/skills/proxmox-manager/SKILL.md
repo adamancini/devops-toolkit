@@ -91,8 +91,9 @@ ssh <SSH_USER>@<NODE_HOST> '<command>'
 
 | Method | Operations |
 |--------|-----------|
-| REST API | VM create, start, stop, resize, migrate, clone, status, snapshot, backup, cluster/node info, tag management, configuration changes |
-| SSH | Disk import, template conversion, cloud image download, cloud-init snippets, ISO uploads |
+| REST API (`curl`) | VM create, start, stop, resize, migrate, clone, status, snapshot, backup, cluster/node info, tag management, configuration changes |
+| `pvesh` (via SSH) | Same as REST API but from the node shell -- no auth headers needed, human-readable output. Preferred for SSH-based operations and Ansible tasks delegated to PVE hosts. See `references/pvesh-tool.md` |
+| SSH (direct) | Disk import, template conversion, cloud image download, cloud-init snippets, ISO uploads, `qm` commands |
 
 ### API Connectivity Check
 
@@ -108,11 +109,16 @@ Expected: `200`. If `401`, credentials are invalid. If `000`, node is unreachabl
 
 ## Detailed API Reference
 
-For full API curl examples, read these reference files on demand:
+**Source of truth for the Proxmox VE API:** <https://pve.proxmox.com/pve-docs/api-viewer/>
+
+The API viewer is the canonical reference for every PVE endpoint, parameter, return type, and permission. When the reference files below lack detail, consult the API viewer directly.
+
+For full API curl examples and pvesh usage, read these reference files on demand:
 
 | Reference File | Contents |
 |----------------|----------|
 | `references/api-operations.md` | VM CRUD, task polling, migration, status queries |
+| `references/pvesh-tool.md` | `pvesh` CLI tool -- on-node API access without HTTP, command mapping, output formats |
 | `references/bulk-tag-operations.md` | Tag-based filtering, bulk start/stop/tag/untag |
 | `references/snapshots-backups-storage.md` | Snapshot management, vzdump backups, storage queries, orphaned disks |
 | `references/rbac-bootstrap.md` | First-time API credential setup |
