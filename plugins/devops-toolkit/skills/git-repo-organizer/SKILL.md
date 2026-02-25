@@ -105,3 +105,14 @@ done
 | Clone other project | `mkdir -p ~/src/github.com/org && cd $_ && git clone ...` |
 | Find all repos | `find ~/go/src ~/src -name ".git" -type d` |
 | Check if Go | `test -f go.mod` |
+| Create worktree | `gwt <branch-name>` (see **git-worktree-manager skill**) |
+
+## Worktree Convention
+
+For parallel development on multiple branches, use the `gwt` function which creates worktrees under `.worktrees/` inside the repo root. See the **git-worktree-manager skill** for full documentation.
+
+```bash
+cd ~/src/github.com/org/repo
+gwt feat-new-api          # creates .worktrees/feat-new-api
+cd .worktrees/feat-new-api
+```

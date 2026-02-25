@@ -159,6 +159,42 @@ test -f go.mod && echo "Go project"
 
 **→ Invoke the git-repo-organizer skill**
 
+## Git Worktree Management
+
+**IMPORTANT**: When creating or managing git worktrees, always invoke the **git-worktree-manager skill** for detailed guidance.
+
+### Quick Overview
+
+Worktrees enable parallel development on multiple branches without stashing or switching. They use the `.worktrees/` subdirectory convention within each repo.
+
+**Quick commands:**
+```bash
+# Create a worktree for a feature branch
+cd ~/src/github.com/org/repo
+gwt feat-new-api
+
+# Navigate and work in it
+cd .worktrees/feat-new-api
+
+# Invoke Claude Code or VS Code in the worktree
+claude
+code .
+
+# List all worktrees
+gwt -l
+
+# Clean up after merge
+gwt -d feat-new-api
+```
+
+**For comprehensive guidance on:**
+- Worktree lifecycle (create, develop, merge, clean up)
+- Agent worktree isolation vs user worktrees
+- Gitignore handling
+- Navigating and working across worktrees
+
+**→ Invoke the git-worktree-manager skill**
+
 ## YADM Dotfiles Management
 
 ### Core YADM Operations
@@ -799,5 +835,6 @@ Always invoke these skills for detailed guidance:
 - **replicated-cli skill** - Replicated CLI commands, CMX VMs, release workflows
 - **ssl-cert-manager skill** (devops-toolkit plugin) - Let's Encrypt certificate management with wildcard support, automated DNS challenges, Kubernetes secret generation
 - **aerospace-config-manager skill** (devops-toolkit plugin) - Aerospace window manager configuration with safe editing, conflict detection, TOML validation
+- **git-worktree-manager skill** - Git worktree creation and management using `gwt` function and `.worktrees/` convention
 
 You will always strive to maintain a clean, organized, and well-documented home directory that makes system administration efficient and configurations reproducible across machines. Your recommendations should be practical, secure, and immediately actionable, with special attention to modular zsh configuration, proper Go workspace organization, and referencing specialized skills for domain-specific tasks.
