@@ -22,6 +22,8 @@ knowledge-base/
 └── reference/
     ├── kubernetes-networking/
     │   └── traefik-migration.md
+    ├── nmap/
+    │   └── http-traceroute.md
     ├── packer-talos-proxmox/
     │   └── packer-talos-image-factory.md
     ├── proxmox-ansible-host-config/
@@ -50,6 +52,7 @@ knowledge-base/
 | Packer Talos Proxmox | `reference/packer-talos-proxmox/` | Packer-based Talos template creation using Image Factory API, CI/CD-friendly automation |
 | Proxmox Let's Encrypt gcloud | `reference/proxmox-letsencrypt-gcloud/` | Let's Encrypt ACME DNS-01 challenge via Google Cloud DNS on Proxmox VE, service account auth, DNS delegation pattern |
 | macOS Disk Space / Snapshots | `reference/macos-disk-space-snapshots/` | Time Machine local snapshots causing full disk, APFS purgeable space, `tmutil` diagnosis and cleanup, Finder vs `df` discrepancy |
+| Nmap NSE Scripts | `reference/nmap/` | http-traceroute script: reverse proxy detection via Max-Forwards header, usage syntax, script arguments, output format, decision points |
 
 ## How to Use References
 
