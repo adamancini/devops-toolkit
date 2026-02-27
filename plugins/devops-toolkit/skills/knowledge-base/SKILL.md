@@ -36,6 +36,8 @@ knowledge-base/
     │   └── ...
     ├── talos-proxmox-nocloud/
     │   └── nocloud-boot-provisioning.md
+    ├── synology-dsm-troubleshooting/
+    │   └── synocgid-login-failure.md
     └── talos-terraform-proxmox/
         └── terraform-talos-ha-pattern.md
 ```
@@ -53,6 +55,7 @@ knowledge-base/
 | Proxmox Let's Encrypt gcloud | `reference/proxmox-letsencrypt-gcloud/` | Let's Encrypt ACME DNS-01 challenge via Google Cloud DNS on Proxmox VE, service account auth, DNS delegation pattern |
 | macOS Disk Space / Snapshots | `reference/macos-disk-space-snapshots/` | Time Machine local snapshots causing full disk, APFS purgeable space, `tmutil` diagnosis and cleanup, Finder vs `df` discrepancy |
 | Nmap NSE Scripts | `reference/nmap/` | http-traceroute script: reverse proxy detection via Max-Forwards header, usage syntax, script arguments, output format, decision points |
+| Synology DSM Troubleshooting | `reference/synology-dsm-troubleshooting/` | synocgid daemon failure causing empty SID on login, DSM web stack architecture, cascading Kubernetes CSI failures, diagnostic flow, key file locations and CLI tools |
 
 ## How to Use References
 
