@@ -106,6 +106,10 @@ When `synocgid` is down, the Synology CSI driver loses the ability to manage sto
 4. **Cascading pod failures** -- any pod with a Synology PVC that gets rescheduled (node drain, eviction, OOM) cannot start on the new node
 5. **StatefulSet disruptions** -- StatefulSets with Synology PVCs cannot scale or recover from pod failures
 
+### Recovery
+
+The Synology CSI driver **auto-recovers** after `synocgid` is restarted on the NAS. No CSI pod restarts are needed. The driver retries failed operations internally and resumes provisioning volumes once the webapi is responsive again. Confirmed 2026-02-27: after restarting synocgid, the CSI controller successfully provisioned PVCs for netdata, loki, grafana, and garage with no manual intervention on the Kubernetes side.
+
 ### Detection
 
 In Kubernetes, watch for these signs pointing to a NAS-side issue:
