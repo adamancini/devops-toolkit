@@ -522,3 +522,68 @@ values.yaml <-> KOTS Config <-> KOTS HelmChart <-> development-values.yaml
 4. **`development-values.yaml`** — For headless/CI testing without the Admin Console
 
 Every config option in (2) needs a corresponding mapping in (3) that produces values matching (1)'s schema. Option (4) mirrors (2) for automated testing. A mismatch between any pair causes deployment failures that are hard to diagnose.
+
+### KOTS Template Functions Do Not Work Inside Helm Charts
+
+KOTS template functions (`ConfigOption`, `HasLocalRegistry`, etc.) are **never** evaluated inside Helm chart template files (`.tpl`, `templates/*.yaml`). They only work in KOTS custom resources: HelmChart CR, Config, Application, SupportBundle, etc.
+
+The HelmChart CR is the bridge — it maps KOTS-rendered values into the chart's `values.yaml`. The Helm chart itself should be a standard chart that works with plain `helm install`.
+
+### LicenseFieldValue Returns Strings, Not Native Types
+
+`LicenseFieldValue` **always** returns a string, regardless of the license field type. You must pipe through conversion functions:
+
+```yaml
+# WRONG — compares a string, not a boolean
+premium:
+  enabled: repl{{ LicenseFieldValue "premium_feature" }}
+
+# RIGHT — converts to proper boolean
+premium:
+  enabled: repl{{ LicenseFieldValue "premium_feature" | ParseBool }}
+```
+
+### Deleting Default Values with "null"
+
+To delete a key from the chart's `values.yaml` during KOTS deployment, set it to the quoted string `"null"`:
+
+```yaml
+# CORRECT — deletes the key
+unwantedKey: "null"
+
+# WRONG — YAML interprets bare null as the null type, not a deletion signal
+unwantedKey: null
+```
+
+### Raw YAML from User Config (Textarea Pattern)
+
+When accepting arbitrary YAML from users (node selectors, labels, annotations), use `type: textarea` and handle the empty case explicitly:
+
+```yaml
+# In kots-config.yaml:
+- name: custom_annotations
+  type: textarea
+  default: ""
+
+# In HelmChart values — handle empty vs populated:
+annotations: 'repl{{ if ConfigOptionEquals "custom_annotations" "" }}{}repl{{ else }}repl{{ ConfigOption "custom_annotations" | nindent 6 }}repl{{end}}'
+```
+
+Without the empty-case guard, an empty textarea renders as bare `""` which can break YAML mapping expectations.
+
+**Source:** [Community: Configuring Helm Charts with Raw YAML Data in KOTS](https://community.replicated.com/t/configuring-helm-charts-with-raw-yaml-data-in-kots/1554).
+
+### Generated Defaults Are Ephemeral (KOTS #518)
+
+Default values for config items — especially generated ones like certificates from `genCA`/`genSignedCert` — are recalculated each time the application configuration is modified. This means TLS cert/key pairs can become mismatched after a config change.
+
+**Fix:** For values that must persist, use `value:` (not `default:`) with `hidden: true`. The `value` field is only set once on first install and preserved across upgrades:
+
+```yaml
+- name: app_secret_key
+  type: password
+  hidden: true
+  value: '{{repl RandomString 32}}'
+```
+
+**Source:** [KOTS Issue #518](https://github.com/replicatedhq/kots/issues/518).
