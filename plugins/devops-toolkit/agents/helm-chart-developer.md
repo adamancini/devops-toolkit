@@ -262,3 +262,263 @@ Always test on a real cluster (kind, k3s, or CMX) before declaring a chart ready
 Only include chart tarballs and required custom resources in releases. Vendor portals (Replicated, ArtifactHub) attempt to parse all `.tgz`/`.tar.gz` files as Helm charts. Support bundles, debug artifacts, or other tarballs in the release directory cause parse failures.
 
 Use `.helmignore` aggressively and automate release packaging to include only approved artifact types.
+
+## Replicated/KOTS Templating Interactions
+
+When Helm charts are distributed via Replicated KOTS, an additional templating layer (Replicated template functions) wraps around Helm's own templating. This creates a two-phase rendering pipeline with subtle interaction bugs. These lessons come from production debugging, KOTS GitHub issues, and Replicated community knowledge.
+
+### The Rendering Pipeline (Critical Context)
+
+KOTS processes HelmChart custom resources in this order:
+1. **Go template rendering** — KOTS evaluates `repl{{ }}` and `{{repl }}` expressions as Go templates
+2. **YAML parsing** — The rendered output is parsed as YAML
+3. **Helm value injection** — Parsed values are passed to `helm template` / `helm upgrade`
+
+This means **Go template syntax rules apply before YAML rules**. Quoting, escaping, and type handling must account for both layers.
+
+### YAML Quoting with Replicated Templates
+
+**The Problem:** Backslash-escaped quotes inside double-quoted YAML strings break Go template parsing. Because KOTS evaluates Go templates *before* YAML parsing, the backslash escapes are interpreted by the Go template engine, not the YAML parser.
+
+```yaml
+# WRONG — causes "unexpected \\ in operand" error in Admin Console
+HOST: "redis://:repl{{ ConfigOption \"valkey_password\" }}@gitea-valkey:6379"
+
+# RIGHT — single-quoted YAML lets inner double quotes pass through cleanly
+HOST: 'redis://:repl{{ ConfigOption "valkey_password" }}@gitea-valkey:6379'
+```
+
+**Rule:** When a `repl{{ }}` expression contains double-quoted string arguments AND lives inside a YAML string value, always use single-quoted YAML strings. This applies to `optionalValues`, `values`, connection strings, and any context where template functions take quoted arguments.
+
+**Source:** Commit `54c04a1` in platform-examples (Gitea Valkey connection string fix).
+
+### Boolean Config Values: "0"/"1" Not true/false
+
+KOTS `bool` type config items store values as the **strings `"0"` and `"1"`**, not as YAML/Go booleans. This is the single most common source of confusion.
+
+```yaml
+# In kots-config.yaml:
+- name: cassandra_enabled
+  type: bool
+  default: false    # accepts false, "false", "0" — all stored as "0"
+
+# In HelmChart values — ALWAYS compare against "1":
+cassandra:
+  enabled: repl{{ ConfigOptionEquals "cassandra_enabled" "1" }}
+
+# WRONG — these will never match:
+enabled: repl{{ ConfigOptionEquals "cassandra_enabled" "true" }}
+enabled: repl{{ ConfigOptionEquals "cassandra_enabled" true }}
+enabled: repl{{ ConfigOptionEquals "cassandra_enabled" 1 }}
+```
+
+`ConfigOptionEquals` returns Go template booleans (`true`/`false`), which KOTS renders as unquoted YAML — Helm then receives native YAML booleans. This works correctly for `enabled:` fields. However, if your Helm chart expects a string `"true"`, you need `ConfigOption` with `ParseBool` instead.
+
+**Source:** [KOTS Issue #586](https://github.com/replicatedhq/kots/issues/586) — string values coerced to bool; [Community: Setting Helm Chart Dependencies with KOTS Boolean Config](https://community.replicated.com/t/how-to-set-helm-chart-dependencies-with-kots-boolean-config/1556).
+
+### String-to-Bool Type Coercion (KOTS #586)
+
+When `ConfigOptionEquals` renders `true` or `false` into HelmChart `spec.values`, KOTS strips surrounding quotes. The rendered value becomes a bare `true`/`false` in YAML, which is a boolean — not a string.
+
+This is **usually what you want** for `enabled:` fields. But it breaks when:
+- The Helm chart expects a **string** (e.g., annotation values like `"false"`)
+- You need the literal string `"true"` or `"false"` preserved with quotes
+
+```yaml
+# This renders as: some_annotation: false (boolean, not string "false")
+# If the chart template does {{ .Values.some_annotation | quote }}, it works.
+# If the chart uses {{ .Values.some_annotation }} directly in an annotation, it may fail.
+some_annotation: repl{{ ConfigOptionEquals "feature_enabled" "1" }}
+```
+
+**Mitigation:** If the downstream Helm chart needs a quoted string, use `ConfigOption` directly or wrap in explicit quoting at the Helm template level.
+
+### optionalValues Shallow Merge (KOTS #866)
+
+By default, `optionalValues` performs a **shallow merge** — only the first level of keys is merged. Nested keys are **overwritten entirely** by the base `values.yaml`.
+
+```yaml
+# WRONG — nested keys under "gitea.config.cache" get overwritten
+optionalValues:
+  - when: 'repl{{ ConfigOptionEquals "cache_enabled" "1" }}'
+    values:
+      gitea:
+        config:
+          cache:
+            ADAPTER: redis
+
+# RIGHT — recursiveMerge preserves all nested keys
+optionalValues:
+  - when: 'repl{{ ConfigOptionEquals "cache_enabled" "1" }}'
+    recursiveMerge: true
+    values:
+      gitea:
+        config:
+          cache:
+            ADAPTER: redis
+```
+
+**Rule:** Always use `recursiveMerge: true` on every `optionalValues` entry unless you intentionally want to replace the entire subtree.
+
+**Source:** [KOTS Issue #866](https://github.com/replicatedhq/kots/issues/866).
+
+### repl{{ }} vs {{repl }} Syntax
+
+Both syntaxes invoke Replicated template functions, but they are **not interchangeable** — context determines which to use:
+
+| Context | Syntax | Example |
+|---------|--------|---------|
+| HelmChart `spec.values` | `repl{{ }}` | `enabled: repl{{ ConfigOptionEquals "x" "1" }}` |
+| HelmChart `spec.optionalValues[].when` | Either (quoted) | `when: 'repl{{ ConfigOptionEquals "x" "1" }}'` |
+| HelmChart `spec.exclude` | Either (quoted) | `exclude: 'repl{{ ConfigOptionEquals "x" "y" }}'` |
+| KOTS Config `when` clauses | Either (quoted) | `when: 'repl{{ ConfigOptionEquals "x" "1" }}'` |
+| `statusInformers` | `{{repl }}` | `'{{repl if ConfigOptionEquals "x" "1"}}...{{repl end}}'` |
+| `kots.io/when` annotations | `{{repl }}` | `'{{repl ConfigOptionEquals "x" "y" }}'` |
+| Raw K8s manifest values | `{{repl }}` | `'{{repl ConfigOption "name" }}'` |
+
+**Key difference:** `{{repl }}` is required for Go template **control flow** (`if`/`end`/`range`/`with`). The `repl{{ }}` prefix syntax only works for **expressions** that return values.
+
+### Release.IsInstall and Release.IsUpgrade Are Broken Under KOTS
+
+KOTS uses `helm template` internally, not `helm install`/`helm upgrade`. This means:
+- `.Release.IsInstall` is **always `true`**
+- `.Release.IsUpgrade` is **always `false`**
+
+Do not use these in Helm templates distributed via KOTS. Use KOTS-level mechanisms (config options, annotations, optionalValues) for install-vs-upgrade logic instead.
+
+**Source:** [Community: Helm Release.IsInstall and IsUpgrade are inaccurate](https://community.replicated.com/t/helm-release-isinstall-and-isupgrade-are-inaccurate/1189).
+
+### lookup() Function Not Supported Under KOTS
+
+Because KOTS renders charts with `helm template` (no cluster connection), the Helm `lookup()` function **always returns empty**. Charts that use `lookup()` for secret preservation or resource detection will behave as if those resources don't exist.
+
+**Implication:** The "Secret Generation with Helm Lookup" pattern described above works for direct Helm installs but **not under KOTS**. For KOTS-distributed charts, use Replicated's `RandomString` in `kots-config.yaml` with `hidden: true` config items instead:
+
+```yaml
+# In kots-config.yaml — generates once, persists across upgrades
+- name: app_secret_key
+  type: password
+  hidden: true
+  value: '{{repl RandomString 32}}'
+```
+
+**Source:** [Community: Is the Helm lookup() function supported?](https://community.replicated.com/t/is-the-helm-lookup-function-supported/1060).
+
+### Air-Gap Image Rewriting Patterns
+
+Three patterns exist for rewriting image references when `HasLocalRegistry` is true. Choose based on your chart's image value structure:
+
+**Pattern 1: Separate registry/repository fields** (preferred when chart supports it)
+```yaml
+image:
+  registry: '{{repl HasLocalRegistry | ternary LocalRegistryHost "quay.io" }}'
+  repository: '{{repl HasLocalRegistry | ternary LocalRegistryNamespace "jetstack" }}/cert-manager-controller'
+```
+
+**Pattern 2: Combined repository with `print`** (when chart has only `repository`)
+```yaml
+image:
+  repository: repl{{ HasLocalRegistry | ternary (print LocalRegistryHost "/cloudnative-pg/postgresql") "ghcr.io/cloudnative-pg/postgresql" }}
+```
+
+**Pattern 3: Multi-expression concatenation** (complex paths)
+```yaml
+image:
+  repository: '{{repl HasLocalRegistry | ternary LocalRegistryHost "ghcr.io" }}/{{repl HasLocalRegistry | ternary LocalRegistryNamespace "wg-easy" }}/wg-easy'
+```
+
+**Critical rules:**
+- Image names must be **globally unique** across all charts. KOTS strips paths and keeps only `name:tag` when pushing to local registries. Two images named `postgres:16` from different registries will collide.
+- The `spec.builder` key must contain **static/hardcoded** upstream image locations (no template functions) to ensure air-gap bundles include all images.
+- `ImagePullSecretName` should be added to every Pod spec for private registry auth.
+
+### Type Conversion Functions
+
+Config values are always strings. Use conversion functions when Helm expects specific types:
+
+```yaml
+# Integer (e.g., port numbers, replica counts)
+port: repl{{ ConfigOption "vpn_port" | ParseInt }}
+
+# Boolean from string config (not a bool type item)
+deploy: repl{{ ConfigOption "deploy_feature" | ParseBool }}
+
+# File content with YAML block scalar
+cert: repl{{ print `|`}}repl{{ ConfigOptionData `tls_cert` | nindent 12 }}
+```
+
+**Note:** `ConfigOptionData` (not `ConfigOption`) is required for `file` type config items. The `repl{{ print |}}` trick emits a YAML literal block scalar indicator before the file content.
+
+### Embedded vs External Database Toggle Pattern
+
+A common pattern for charts that support both embedded and external databases:
+
+```yaml
+# In HelmChart values:
+postgres:
+  embedded:
+    enabled: 'repl{{ ConfigOptionNotEquals "postgres_external" "1" }}'
+  external:
+    enabled: repl{{ ConfigOptionEquals "postgres_external" "1" }}
+
+# In optionalValues — inject external connection details only when external:
+optionalValues:
+  - when: 'repl{{ ConfigOptionEquals "postgres_external" "1" }}'
+    recursiveMerge: true
+    values:
+      postgres:
+        external:
+          host: repl{{ ConfigOption "external_postgres_host" }}
+          password: repl{{ ConfigOption "external_postgres_password" }}
+
+# Use exclude to skip the embedded database chart entirely:
+# (in a separate HelmChart CR for the database operator)
+exclude: 'repl{{ ConfigOptionEquals "postgres_external" "1" }}'
+```
+
+Use `ConfigOptionNotEquals` for the inverse condition — it is cleaner than `not (ConfigOptionEquals ...)`.
+
+### Conditional Status Informers
+
+Use inline `{{repl if}}...{{repl end}}` to conditionally include status informers based on which components are enabled:
+
+```yaml
+statusInformers:
+  - '{{repl if ConfigOptionEquals "cassandra_enabled" "1"}}statefulset/app-cassandra{{repl end}}'
+  - '{{repl if and (ConfigOptionEquals "postgres_enabled" "1") (ConfigOptionNotEquals "postgres_external" "1")}}service/postgres-nodeport{{repl end}}'
+```
+
+Use `and`/`or` operators for compound conditions. Note the `{{repl }}` syntax is required here (not `repl{{ }}`), because this uses Go template control flow.
+
+### nindent Alignment in KOTS HelmChart Values
+
+When using `nindent` with Replicated template functions, count the exact indentation level where the content should appear in the final YAML:
+
+```yaml
+# The number passed to nindent must match the target indentation depth
+annotations: repl{{ ConfigOptionData `ingress_annotations` | nindent 10 }}
+```
+
+Common mistake: using the wrong indentation count causes either broken YAML or silently misplaced content. Always verify with `helm template` after KOTS rendering.
+
+### Helm 3.18.5+ Schema Validation
+
+Helm 3.18.5 introduced stricter JSON schema validation. If your chart uses `values.schema.json` with `"additionalProperties": false`, dynamically injected values from KOTS (like Replicated SDK values or optionalValues) may fail validation. Test schema compatibility when upgrading Helm versions.
+
+**Source:** [Community: Helm 3.18.5 Upgrade Impact](https://community.replicated.com/t/helm-3-18-5-upgrade-impact-schema-validation-changes/1577).
+
+### The Four-Way Contract
+
+When distributing Helm charts via Replicated, four artifacts must stay in sync:
+
+```
+values.yaml <-> KOTS Config <-> KOTS HelmChart <-> development-values.yaml
+    (1)            (2)              (3)                    (4)
+```
+
+1. **Chart `values.yaml`** — Defines the schema and defaults Helm expects
+2. **`kots-config.yaml`** — Defines the Admin Console UI (field types, defaults, conditionals)
+3. **HelmChart CR `spec.values`** — Maps KOTS config to Helm values using template functions
+4. **`development-values.yaml`** — For headless/CI testing without the Admin Console
+
+Every config option in (2) needs a corresponding mapping in (3) that produces values matching (1)'s schema. Option (4) mirrors (2) for automated testing. A mismatch between any pair causes deployment failures that are hard to diagnose.
