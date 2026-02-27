@@ -339,6 +339,16 @@ When reviewing HelmChart custom resources, check for these common issues:
 
 - **Type conversions**: Config values are always strings. Use `ParseInt` for ports/replicas, `ParseBool` for boolean strings, `ConfigOptionData` (not `ConfigOption`) for file-type config items.
 
+- **Unquoted `when` clauses in Config CR**: Always single-quote `when` values that contain `repl{{ }}` expressions. Unquoted values work in most cases but are fragile and inconsistent with other KOTS CR contexts. <!-- added: 2026-02-27 -->
+
+  ```yaml
+  # Wrong -- unquoted, fragile:
+  when: repl{{ (ConfigOptionEquals "feature_enabled" "1")}}
+
+  # Correct -- single-quoted, consistent:
+  when: 'repl{{ ConfigOptionEquals "feature_enabled" "1" }}'
+  ```
+
 ---
 
 ## 4. Patterns Requiring Deep Investigation
@@ -743,7 +753,39 @@ A few notes:
 - [ ] All images can be relocated to private registry
 - [ ] Image pull secrets work correctly
 - [ ] No internet-dependent init containers or jobs
+- [ ] No runtime package installation (`apk add`, `apt-get`, `yum`) in containers, init containers, or Jobs
 - [ ] Helm chart can be packaged and deployed offline
+
+#### Runtime Package Installation in Air-Gap <!-- added: 2026-02-27 -->
+
+Containers, init containers, and Jobs that install packages at runtime (e.g., `apk add curl jq`) will fail in air-gap environments where package repositories are unreachable. This is a common pattern in setup Jobs that need tools like `curl` or `jq`.
+
+```yaml
+# WRONG -- fails in air-gap:
+command:
+  - sh
+  - -c
+  - |
+    apk add --no-cache curl jq
+    curl -sf http://service/api ...
+
+# CORRECT -- use a pre-built image with required tools:
+image: curlimages/curl:latest   # or build a custom image
+command:
+  - sh
+  - -c
+  - |
+    curl -sf http://service/api ...
+
+# ALTERNATIVE -- use wget (built into Alpine/BusyBox) with shell-based parsing:
+command:
+  - sh
+  - -c
+  - |
+    wget -qO- http://service/api ...
+```
+
+**Detection:** Search Jobs and init containers for `apk add`, `apt-get install`, `yum install`, or `pip install` commands.
 
 ### KOTS Integration Testing
 
@@ -1002,5 +1044,6 @@ keywords:
 
 ## Changelog
 
+- **2026-02-27**: Added findings from StorageBox review (second pass): unquoted `when` clause antipattern in KOTS Config CR (Section 3), runtime package installation air-gap check and detection heuristic (Section 7).
 - **2026-02-27**: Added findings from StorageBox review: Helm Hooks section (hooks on operator-managed CRs, conditional hook trap), Cross-Referencing Checks section (orphan values, subchart image air-gap coverage, Config item when-guard completeness, template hardcoded values).
 - **2026-02-27**: Initial import from CRE Helm Chart Architecture Runbook. Added KOTS templating gotchas section. Added Embedded Cluster review items.
