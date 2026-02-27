@@ -345,6 +345,61 @@ When reviewing HelmChart custom resources, check for these common issues:
 
 ### Helm Hooks
 
+<!-- added: 2026-02-27 -->
+
+**Questions to Answer:**
+
+- Are Helm hooks used? If so, what are their purposes?
+- Do hooks reference CRD-managed resources (e.g., operator CRs)?
+- What is the `hook-delete-policy`?
+- Do hooks use `pre-install` only, or do they also include `pre-upgrade`?
+
+**Antipattern: Hooks on Operator-Managed CRs**
+
+Using `helm.sh/hook: pre-install` with `helm.sh/hook-delete-policy: hook-succeeded` on CRD-based resources (e.g., CNPG `Cluster`, K8ssandraCluster, MinIO `Tenant`) is destructive. Helm will delete the CR immediately after it is created successfully, which causes the operator to tear down the managed workload.
+
+```yaml
+# WRONG -- Helm will delete this Cluster CR after it is created:
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  annotations:
+    "helm.sh/hook": pre-install
+    "helm.sh/hook-delete-policy": hook-succeeded
+spec:
+  instances: 3
+  ...
+```
+
+```yaml
+# CORRECT -- Operator CRs should be regular Helm-managed resources:
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: postgres
+  labels:
+    {{- include "app.labels" . | nindent 4 }}
+spec:
+  instances: {{ .Values.postgres.instances }}
+  ...
+```
+
+**Antipattern: Conditional Hooks Inside `with` Blocks**
+
+Placing hook annotations inside a `{{- with .Values.annotations }}` block means hooks are only active when the user provides custom annotations. This creates a latent trap: the chart works fine by default, but adding any annotation activates destructive hook behavior.
+
+```yaml
+# DANGEROUS -- hooks activate only when annotations are set:
+{{- with .Values.annotations }}
+annotations:
+  {{- toYaml . | nindent 4 }}
+  "helm.sh/hook": pre-install
+  "helm.sh/hook-delete-policy": hook-succeeded
+{{- end }}
+```
+
+Always review hooks for unintended interaction with conditional template blocks.
+
 ### Secrets Management
 
 **Questions to Answer:**
@@ -441,6 +496,85 @@ When reviewing HelmChart custom resources, check for these common issues:
 - Configurable service types (ClusterIP, NodePort, LoadBalancer)
 - Optional network policies
 - Document port requirements
+
+### Cross-Referencing Checks
+
+<!-- added: 2026-02-27 -->
+
+These checks validate consistency across the four-way contract (values.yaml, KOTS Config, HelmChart CR, development-values.yaml).
+
+#### Orphan Values in HelmChart CR
+
+Values set in the HelmChart CR `spec.values` that the chart's templates never read are silently ignored. This often indicates a schema mismatch between the HelmChart CR and the chart.
+
+**Detection:** For each top-level key in HelmChart CR `spec.values`, verify that the chart's templates or subcharts actually reference `.Values.<key>`. Pay special attention to `enabled` flags at the wrong nesting level (e.g., `postgres.enabled` vs `postgres.embedded.enabled`).
+
+```yaml
+# WRONG -- HelmChart CR sets postgres.enabled but chart reads postgres.embedded.enabled:
+spec:
+  values:
+    postgres:
+      enabled: repl{{ ConfigOptionEquals "postgres_enabled" "1" }}
+      embedded:
+        enabled: 'repl{{ ConfigOptionNotEquals "postgres_external" "1" }}'
+
+# CORRECT -- only set values the chart actually reads:
+spec:
+  values:
+    postgres:
+      embedded:
+        enabled: 'repl{{ and (ConfigOptionEquals "postgres_enabled" "1") (ConfigOptionNotEquals "postgres_external" "1") }}'
+      external:
+        enabled: repl{{ and (ConfigOptionEquals "postgres_enabled" "1") (ConfigOptionEquals "postgres_external" "1") }}
+```
+
+#### Subchart Image Air-Gap Coverage
+
+When a chart includes subcharts, every subchart image must be covered by air-gap rewriting patterns in the HelmChart CR. Subcharts have their own default image references that are not automatically proxied.
+
+**Detection:** Extract subchart archives from `charts/` and check their `values.yaml` for `image.repository` fields. Verify each image has a corresponding override in the HelmChart CR with `HasLocalRegistry` / `LocalRegistryHost` patterns.
+
+Common misses:
+- Third-party subcharts pulled via `helm dependency update` (NFS server, Redis, etc.)
+- Init container images defined in subchart templates
+- Sidecar images injected by subchart logic
+
+#### Config Item `when` Guard Completeness
+
+Every KOTS Config item that belongs to an optional component should have a `when` clause gating its visibility on the parent component's `enabled` toggle. Missing guards clutter the Admin Console with irrelevant fields.
+
+**Detection:** For each config group associated with an optional component (e.g., Cassandra, PostgreSQL, MinIO), verify that all items except the master `enabled` toggle have a `when` clause referencing that toggle.
+
+```yaml
+# WRONG -- credential fields visible even when component is disabled:
+- name: cassandra_user
+  title: Cassandra Superuser
+  type: text
+  default: cassandra
+
+# CORRECT:
+- name: cassandra_user
+  title: Cassandra Superuser
+  type: text
+  default: cassandra
+  when: 'repl{{ ConfigOptionEquals "cassandra_enabled" "1" }}'
+```
+
+#### Template Hardcoded Values
+
+Templates that hardcode values instead of reading from `.Values.*` create a disconnect where the HelmChart CR and KOTS Config expose a setting, but the chart ignores it.
+
+**Detection:** For each configurable field in the HelmChart CR, grep the corresponding template to verify it reads from `.Values`.
+
+```yaml
+# WRONG -- template ignores .Values.postgres.embedded.instances:
+spec:
+  instances: 1
+
+# CORRECT:
+spec:
+  instances: {{ .Values.postgres.embedded.instances | default 1 }}
+```
 
 ---
 
@@ -868,4 +1002,5 @@ keywords:
 
 ## Changelog
 
+- **2026-02-27**: Added findings from StorageBox review: Helm Hooks section (hooks on operator-managed CRs, conditional hook trap), Cross-Referencing Checks section (orphan values, subchart image air-gap coverage, Config item when-guard completeness, template hardcoded values).
 - **2026-02-27**: Initial import from CRE Helm Chart Architecture Runbook. Added KOTS templating gotchas section. Added Embedded Cluster review items.
