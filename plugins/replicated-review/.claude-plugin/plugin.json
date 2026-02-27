@@ -1,0 +1,12 @@
+{
+  "name": "replicated-review",
+  "version": "1.0.0",
+  "description": "Replicated release and Helm chart architecture review toolkit. Performs structured reviews of vendor Helm charts and Replicated releases, generates customer-facing deliverables, and maintains a living runbook of best practices and antipatterns.",
+  "author": {
+    "name": "Ada Mancini"
+  },
+  "homepage": "https://github.com/adamancini/devops-toolkit",
+  "repository": "https://github.com/adamancini/devops-toolkit",
+  "license": "MIT",
+  "keywords": ["replicated", "helm", "kots", "review", "architecture", "kubernetes", "embedded-cluster"]
+}

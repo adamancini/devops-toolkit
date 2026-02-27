@@ -16,6 +16,15 @@
       "author": {
         "name": "Adam Ancini"
       }
+    },
+    {
+      "name": "replicated-review",
+      "source": "./plugins/replicated-review",
+      "version": "1.0.0",
+      "description": "Replicated release and Helm chart architecture review toolkit",
+      "author": {
+        "name": "Ada Mancini"
+      }
     }
   ]
 }
