@@ -1,3 +1,8 @@
+---
+description: Regenerate the review runbook by consolidating all knowledge sources
+allowed-tools: ["Read", "Grep", "Glob", "Write", "Edit", "Bash", "Skill"]
+---
+
 # Sync Runbook
 
 I'll regenerate the review runbook by consolidating all knowledge sources into a clean, publication-ready document.

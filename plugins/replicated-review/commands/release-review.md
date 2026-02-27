@@ -1,3 +1,9 @@
+---
+description: Perform a Replicated release architecture review
+argument-hint: <path-to-release-directory>
+allowed-tools: ["Read", "Grep", "Glob", "Write", "Edit", "Bash", "Task", "AskUserQuestion", "Skill"]
+---
+
 # Release Review
 
 Perform a Replicated release architecture review using the `helm-chart-developer` agent with the `release-review` skill.
