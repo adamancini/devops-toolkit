@@ -292,7 +292,30 @@ task talos:status PROFILE=talos-staging
 - 503 errors: tune `/etc/default/pveproxy` with `WORKERS=4`+
 - Session stickiness required for PVE GUI
 
+### VM Destroy Is Asynchronous -- Ghost VMs
+- The Proxmox API `DELETE /qemu/{vmid}` returns a UPID immediately; the actual destroy happens in the background
+- If you re-provision before destroy completes, the Ansible `proxmox_kvm` clone task sees "ALREADY EXISTS" and skips cloning, producing VMs with no disk
+- **Always verify VMs are fully gone before re-provisioning:** query the VMID on ALL PVE nodes (VMs may be on the template source node, not the migration target)
+- Wait at least 15-20 seconds between stop and destroy; verify `data: null` in the status response after destroy
+
+### VMs on Wrong Node After Failed Provision
+- The Ansible playbook clones VMs on the template node (pve01), then migrates to target nodes
+- If a previous destroy left ghost VMIDs on pve02/pve03, the clone skips (idempotent) but the migrated VMs have no disks
+- Before re-provisioning, check ALL nodes for the VMIDs: `curl -s .../nodes/{node}/qemu/{vmid}/status/current`
+
+### Talos Extension Changes Rename Network Interfaces
+- Adding/removing Talos extensions changes the factory schematic and initramfs
+- Virtio device enumeration order can change (e.g., `eth0` -> `ens18`)
+- Symptoms: nodes boot with DHCP, etcd peer URLs stale, no default route, Cilium BPF corruption
+- **Prevention:** Test one node first; update all per-node patches and the Ansible template before upgrading remaining nodes
+- See `talos-upgrade.md` "Lessons Learned" for detailed recovery procedures
+
 ### Talos Maintenance Mode Discovery
 - Nodes boot with DHCP, not configured static IPs
 - Scan subnet for port 50000 to find nodes (see `runbooks/talos-cluster-bootstrap.md` step 5)
 - Match via MAC addresses from Proxmox API or cluster profile
+
+### Synology iSCSI + btrfs Format Hangs
+- `mkfs.btrfs` on thin-provisioned Synology iSCSI LUNs hangs indefinitely (SCSI UNMAP/discard)
+- Use `fsType: ext4` for Synology CSI StorageClasses
+- Existing btrfs volumes mount fine; only initial format hangs

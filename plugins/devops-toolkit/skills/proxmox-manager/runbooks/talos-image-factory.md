@@ -108,12 +108,17 @@ tested_with:
 ## Notes
 
 - **Required extension for PVE:** `siderolabs/qemu-guest-agent` is mandatory for Proxmox integration. Without it, the guest agent is unavailable and PVE cannot perform graceful shutdown or IP reporting.
+- **Recommended extensions for storage:**
+  - `siderolabs/iscsi-tools` -- required for iSCSI-based CSI drivers (Synology CSI, democratic-csi, Longhorn iSCSI). Provides `iscsid` and `iscsiadm`.
+  - `siderolabs/btrfs` -- required if any CSI StorageClass uses `fsType: btrfs`. Also needed to mount existing btrfs-formatted iSCSI LUNs.
 - **Optional extensions:**
-  - `siderolabs/iscsi-tools` -- required for iSCSI-based CSI drivers (e.g., democratic-csi, Longhorn iSCSI)
+  - `siderolabs/i915` -- Intel GPU driver for hardware transcoding (Plex, etc.)
   - `siderolabs/util-linux-tools` -- provides `lsblk` and other utilities
   - `siderolabs/tailscale` -- Tailscale VPN integration
+- **CRITICAL -- extension changes rename network interfaces:** Changing the extension set produces a different schematic with a different initramfs. Virtio network devices may enumerate differently (e.g., `eth0` becomes `ens18`). Update all per-node Talos patches and the Ansible node-patch template BEFORE applying the new image. See `talos-upgrade.md` "Lessons Learned" section.
 - **Schematic determinism:** The same set of extensions always produces the same schematic ID. You do not need to re-create schematics unless changing extensions.
 - **Version pinning:** Always use the full version string (e.g., `v1.9.0`, not `v1.9`) in factory URLs. The factory requires exact version matches.
+- **btrfs + thin-provisioned Synology LUNs:** `mkfs.btrfs` hangs on thin-provisioned Synology iSCSI LUNs due to SCSI UNMAP/discard operations. Use `fsType: ext4` for Synology CSI StorageClasses.
 - **Image types:**
   - `nocloud` -- for cloud environments without a metadata service (PVE without cloud-init). Talos configures itself via machine config applied through `talosctl`.
   - `metal` -- for bare-metal installations. Boots into maintenance mode waiting for a machine config.
