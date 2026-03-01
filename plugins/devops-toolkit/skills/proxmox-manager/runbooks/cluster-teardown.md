@@ -140,7 +140,7 @@ tested_with:
 
 - No additional cleanup required -- `purge=1&destroy-unreferenced-disks=1` handles disk and config removal
 - If Flux was bootstrapped, its resources in the Git repository are not affected (only the running cluster is destroyed)
-- Kubeconfig contexts for the destroyed cluster may remain in `~/.kube/config` -- remove manually if desired
+- Kubeconfig contexts for the destroyed cluster may remain in `~/.kube/config` -- use `kubecm delete <context-name>` or `kubecm clear` to remove stale entries. See the **cluster-context-manager skill** for details.
 
 ## Notes
 
