@@ -21,7 +21,8 @@ knowledge-base/
 ├── SKILL.md
 └── reference/
     ├── kubernetes-networking/
-    │   └── traefik-migration.md
+    │   ├── traefik-migration.md
+    │   └── gateway-api-traefik.md
     ├── nmap/
     │   └── http-traceroute.md
     ├── obsidian-automation/
@@ -50,7 +51,7 @@ knowledge-base/
 
 | Topic | Path | Contents |
 |-------|------|----------|
-| Kubernetes Networking | `reference/kubernetes-networking/` | Ingress controller migration, Traefik, Gateway API |
+| Kubernetes Networking | `reference/kubernetes-networking/` | Ingress controller migration, Traefik, Gateway API with Traefik (CRD management, port mapping, cert-manager/external-dns integration) |
 | Proxmox Ansible Host Config | `reference/proxmox-ansible-host-config/` | Ansible role-based hypervisor configuration, network templating, desired-state management |
 | Talos Linux | `reference/talos-linux/` | Image cache, registry DDoS prevention, IMAGECACHE partition, registryd |
 | Talos Proxmox NoCloud | `reference/talos-proxmox-nocloud/` | Talos Linux nocloud/cloud-init boot on Proxmox: SMBIOS serial method, cicustom snippets, nocloud vs metal images, JYSK 3000-cluster scale pattern, known boot issues |
