@@ -59,23 +59,59 @@ When user requests ANY Notion sync, invoke the notion-sync skill and follow its 
 
 ## Interaction Model
 
-### Hybrid File/API Approach
+### CLI-First with Filesystem Fallback
 
-**Direct File Access (always available):**
-- Read notes via Read tool
-- Write/edit via Write/Edit tools
-- Search via Grep/Glob
-- Bulk operations, migrations, audits
+**Tier 1: Obsidian CLI (preferred when available)**
 
-**REST API (when Obsidian running):**
+At the start of any vault operation session, detect CLI availability:
 ```bash
-# Check if Obsidian REST API is available
-curl -s http://127.0.0.1:27123/ --max-time 1
+obsidian version 2>/dev/null
 ```
-- Live vault search
-- Trigger Obsidian refreshes
-- Access plugin functionality
-- Graceful fallback if unavailable
+If exit code 0, the CLI is available. Use it as the primary interface for all supported operations. The CLI queries Obsidian's live in-memory indexes (search, link graph, tags, properties) -- 54x faster than grep for search, 70,000x cheaper in tokens than MCP.
+
+**Tier 2: Direct Filesystem (always available)**
+- Read/Write/Edit/Grep/Glob tools
+- Used for: bulk operations, `.obsidian/` config edits, template files, curated knowledge-base references, vault structure changes, any operation when CLI unavailable
+
+### Operation Routing
+
+| Operation | CLI Command | Filesystem Fallback |
+|-----------|------------|-------------------|
+| Search notes | `obsidian search query="..." format=json` | Grep |
+| Read note | `obsidian read path="..."` | Read tool |
+| Create note | `obsidian create path="..." content="..." silent` | Write tool |
+| Append to note | `obsidian append path="..." content="..."` | Edit tool |
+| Prepend to note | `obsidian prepend path="..." content="..."` | Edit tool |
+| Set property | `obsidian property:set path="..." name="..." value="..."` | Edit tool (YAML) |
+| Read property | `obsidian property:read path="..." name="..."` | Grep frontmatter |
+| List tags | `obsidian tags counts sort=count` | Grep tag patterns |
+| Find orphans | `obsidian orphans` | Manual link analysis |
+| Find backlinks | `obsidian backlinks file="..."` | Grep for `[[wikilinks]]` |
+| Unresolved links | `obsidian unresolved verbose` | Grep + validate |
+| Tasks | `obsidian tasks` / `obsidian tasks daily` | Grep for `- [ ]` |
+| Daily note read | `obsidian daily:read` | Read tool on journal/daily/ |
+| Daily note append | `obsidian daily:append content="..."` | Edit tool |
+| Plugin management | `obsidian plugins` / `obsidian plugin:reload id=...` | Read `.obsidian/` config |
+
+### CLI Syntax Quick Reference
+
+```bash
+# Vault targeting (optional first param; defaults to most recently focused vault)
+obsidian search vault="notes" query="kubernetes" format=json
+
+# File identification: file= (wikilink-style) or path= (vault-relative exact)
+obsidian read file="My Note"           # resolves like [[My Note]]
+obsidian read path="work/kubernetes/note.md"  # exact vault-relative path
+
+# Output: format=json for machine parsing, --copy for clipboard
+obsidian search query="project" format=json limit=20
+
+# Multiline content: \n for newline, \t for tab
+obsidian append path="inbox.md" content="- [ ] New task\n- Details here"
+
+# Silent mode (default in v1.12.2+): use 'open' to explicitly open file
+obsidian create path="work/new-note" content="# Title" template="meeting"
+```
 
 ### Domain Inference
 
@@ -254,10 +290,17 @@ The agent understands and can configure:
 | **QuickAdd** | Create macros, configure captures, automate workflows |
 | **Calendar/Day Planner** | Configure daily notes, journal integration |
 | **Git** | Coordinate vault backup, understand commit patterns |
-| **Local REST API** | Use for live operations when available |
 | **Bases** | Create .base files, configure views, write formulas |
 
-### Configuration Locations
+### Plugin Management via CLI
+
+When CLI is available, use these for plugin operations:
+```bash
+obsidian plugins community format=json    # List community plugins
+obsidian plugin:reload id=dataview        # Reload after config change
+```
+
+### Configuration Locations (Filesystem)
 ```bash
 ~/notes/.obsidian/plugins/*/data.json  # Plugin configs
 ~/notes/.obsidian/app.json             # Core settings
@@ -275,12 +318,12 @@ When creating notes:
 
 ### Organization Tasks
 
-- **Orphan detection** - Find notes not linked from any MOC
-- **Tag consistency audit** - Identify missing/malformed tags
-- **Dead link detection** - Find broken wikilinks
-- **Archive suggestions** - Surface old `status: active` notes
-- **Duplicate detection** - Find notes covering similar topics
-- **Structure migration** - Batch move/rename preserving links
+- **Orphan detection** - `obsidian orphans` (fallback: manual backlink analysis)
+- **Tag consistency audit** - `obsidian tags counts` + Grep for malformed frontmatter tags
+- **Dead link detection** - `obsidian unresolved verbose` (fallback: Grep `[[links]]` + validate)
+- **Archive suggestions** - Grep for `status: active` + check `updated:` dates
+- **Duplicate detection** - `obsidian search` for similar titles/content
+- **Structure migration** - Batch move/rename preserving links (filesystem tools)
 
 ## Template Evolution
 
@@ -441,9 +484,10 @@ User: "Create a note to track this Slack conversation about Chef-360 deployment"
 ```
 User: "What do I know about Embedded Cluster HA?"
 
-1. Search vault via grep/glob + REST API if available
-2. Search curated references in knowledge-base skill
-3. Return relevant notes and references with excerpts
+1. CLI available? Use: obsidian search query="Embedded Cluster HA" format=json
+   Fallback: Grep vault for keywords
+2. Follow up with: obsidian backlinks file="EC HA Setup"
+3. Search curated references in knowledge-base skill (always filesystem -- CLI doesn't index these)
 4. Suggest connections: "Found 3 notes; [[EC HA Setup]] links to [[KOTS Architecture]]"
 ```
 
@@ -461,11 +505,12 @@ User: "My Dataview query isn't showing completed tasks"
 ```
 User: "Audit my vault for organization issues"
 
-1. Find orphaned notes (no backlinks, not in MOCs)
-2. Check frontmatter consistency
-3. Identify dead links
-4. Find notes with status: active older than 6 months
-5. Report findings with suggested actions
+1. CLI: obsidian orphans format=json         (Fallback: manual backlink analysis via Grep)
+2. CLI: obsidian unresolved verbose          (Fallback: Grep for [[links]], validate targets)
+3. CLI: obsidian tags counts sort=count      (Fallback: Grep frontmatter tags)
+4. Check frontmatter consistency via Grep for malformed/missing fields
+5. Grep for "status: active" + check updated: dates > 6 months old
+6. Report findings with suggested actions
 ```
 
 ## Curated Knowledge Base
@@ -504,6 +549,9 @@ When the user researches a topic and wants to "teach Claude":
 ## Documentation References
 
 When users need official documentation:
+- [Obsidian CLI](https://help.obsidian.md/cli) -- complete CLI command reference
+- [Obsidian Headless Sync](https://help.obsidian.md/headless) -- headless sync client
+- [Obsidian URI](https://help.obsidian.md/uri) -- URI protocol automation
 - [Obsidian Flavored Markdown](https://help.obsidian.md/Editing+and+formatting/Obsidian+Flavored+Markdown)
 - [Internal Links](https://help.obsidian.md/links)
 - [Aliases](https://help.obsidian.md/aliases)
@@ -512,6 +560,8 @@ When users need official documentation:
 - [Bases Syntax](https://help.obsidian.md/bases/syntax)
 - [Bases Views](https://help.obsidian.md/bases/views)
 - [Bases Functions](https://help.obsidian.md/bases/functions)
+
+**Curated reference docs:** `knowledge-base/reference/obsidian-automation/` (CLI, Headless, URI)
 
 ## Your Approach
 
