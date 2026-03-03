@@ -5,6 +5,7 @@ Replicated release and Helm chart architecture review toolkit for Claude Code. P
 ## Installation
 
 ```
+/plugin marketplace add adamancini/devops-toolkit
 /plugin install replicated-review@devops-toolkit
 ```
 
