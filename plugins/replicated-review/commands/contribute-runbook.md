@@ -67,12 +67,14 @@ If the user cancels, stop immediately.
 
 ### Step 6 - Create a Contribution Branch
 
-Generate a date-stamped branch name:
+Create a branch from `origin/main` (not from the current HEAD, which may contain other unpushed local commits):
 
 ```bash
 BRANCH_NAME="runbook/contribute-$(date +%Y-%m-%d)"
-git checkout -b "$BRANCH_NAME"
+git checkout -b "$BRANCH_NAME" origin/main
 ```
+
+If the branch name already exists (same-day repeat), append a sequence number: `runbook/contribute-2026-03-04-2`.
 
 ### Step 7 - Stage and Commit
 
@@ -94,30 +96,44 @@ which gh
 
 ### Step 9 - PR Workflow (gh available)
 
-#### 9a - Fork the Repository
+#### 9a - Determine GitHub User and Fork
+
+First, get the authenticated GitHub username:
+
+```bash
+GITHUB_USER=$(gh api user --jq '.login')
+```
+
+Then check if the user is the upstream owner (`adamancini`). If so, skip forking entirely -- push directly to `origin` and proceed to Step 9c.
+
+If the user is NOT the upstream owner, ensure a fork exists:
 
 ```bash
 gh repo fork adamancini/devops-toolkit --clone=false
 ```
 
-This is idempotent -- it succeeds whether or not a fork already exists.
+This is idempotent -- `gh` prints "already exists" if the fork was created previously, and exits 0 in either case.
 
 #### 9b - Determine Fork Remote
 
-Check existing remotes for the fork:
+Check existing remotes for one pointing to the user's fork:
 
 ```bash
 git remote -v
 ```
 
-Look for a remote pointing to the user's fork of `devops-toolkit`. The `gh repo fork` command typically adds a remote named after the user's GitHub handle, or `origin` may have been updated. If no fork remote is found, add one:
+Look for any remote URL containing `$GITHUB_USER/devops-toolkit`. Common remote names to check:
+- The user's GitHub username (e.g., `jdoe`) -- added by `gh repo fork`
+- `fork` -- a conventional name
+- `origin` -- may have been renamed by `gh repo fork` on first run
+
+If a matching remote already exists, use it. If no remote matches, add one:
 
 ```bash
-GITHUB_USER=$(gh api user --jq '.login')
-git remote add fork "https://github.com/$GITHUB_USER/devops-toolkit.git" 2>/dev/null || true
+git remote add fork "https://github.com/$GITHUB_USER/devops-toolkit.git"
 ```
 
-Use whichever remote name points to the fork (commonly the user's GitHub username or `fork`).
+Use the name of whichever remote points to the fork for the remaining steps (referred to as `<fork-remote>` below).
 
 #### 9c - Push the Branch
 
@@ -125,28 +141,43 @@ Use whichever remote name points to the fork (commonly the user's GitHub usernam
 git push <fork-remote> "$BRANCH_NAME"
 ```
 
+If pushing to `origin` (upstream owner case), use `origin` directly.
+
 #### 9d - Open the PR
+
+For upstream owner (pushing to own repo):
+
+```bash
+gh pr create \
+  --repo adamancini/devops-toolkit \
+  --head "$BRANCH_NAME" \
+  --title "docs(runbook): contribute review findings" \
+  --body "<PR body>"
+```
+
+For fork contributors:
 
 ```bash
 gh pr create \
   --repo adamancini/devops-toolkit \
   --head "$GITHUB_USER:$BRANCH_NAME" \
   --title "docs(runbook): contribute review findings" \
-  --body "$(cat <<'PRBODY'
+  --body "<PR body>"
+```
+
+**PR body format** (fill in from the diff output gathered in Step 4):
+
+```markdown
 ## Runbook Contribution
 
 Findings contributed on YYYY-MM-DD.
 
 ### Changed files
-(list each changed file with +/- line counts from git diff --stat)
+- (list each changed file with +/- line counts)
 
 ### Summary
-(auto-generated bullet list describing what was added/changed)
-PRBODY
-)"
+- (auto-generated bullet list describing what was added/changed)
 ```
-
-Replace `YYYY-MM-DD` with today's date and fill in the changed files list and summary from the diff output gathered in Step 4.
 
 Report the PR URL to the user.
 
