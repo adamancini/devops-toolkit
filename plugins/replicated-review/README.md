@@ -44,6 +44,14 @@ The command generates a customer-facing deliverable at `./release-review-<vendor
 
 Consolidates all knowledge from the agent, reference documents, and incremental runbook additions into a clean, deduplicated, publication-ready document. Use this periodically to clean up accumulated additions and before exporting to Google Docs.
 
+### Contribute Runbook Updates
+
+```
+/contribute-runbook
+```
+
+After running reviews that update the runbook, use this command to contribute your changes back to the shared repository. It opens a GitHub PR via fork (requires `gh` CLI) or exports a patch file if `gh` is unavailable.
+
 ## Exporting to Google Docs
 
 The runbook (`skills/release-review/runbook.md`) is written in clean markdown with no plugin-specific syntax. To update the shared Google Doc:
@@ -54,13 +62,11 @@ The runbook (`skills/release-review/runbook.md`) is written in clean markdown wi
 
 ## Contributing
 
-This plugin lives in the devops-toolkit marketplace. To contribute:
+The runbook is automatically updated after reviews. To contribute your updates back to the shared repository:
 
-1. Make changes to files under `plugins/replicated-review/`
-2. Commit and push to the marketplace repo
-3. Other team members get updates on next plugin refresh
-
-The runbook is automatically updated after reviews. New antipatterns and gotchas discovered during reviews are appended with date annotations. Run `/sync-runbook` periodically to clean up accumulated additions.
+1. Run `/contribute-runbook` -- this opens a PR via GitHub fork
+2. If `gh` CLI is not installed, it exports a patch file with manual submission instructions
+3. Other team members get updates on next plugin refresh after the PR is merged
 
 ## Plugin Structure
 
@@ -78,6 +84,7 @@ plugins/replicated-review/
 │           ├── kots-templating.md      # KOTS/Replicated template reference
 │           └── embedded-cluster.md     # Embedded Cluster review items
 └── commands/
+    ├── contribute-runbook.md            # /contribute-runbook command
     ├── release-review.md               # /release-review command
     └── sync-runbook.md                 # /sync-runbook command
 ```
