@@ -339,6 +339,16 @@ When reviewing HelmChart custom resources, check for these common issues:
 
 - **Type conversions**: Config values are always strings. Use `ParseInt` for ports/replicas, `ParseBool` for boolean strings, `ConfigOptionData` (not `ConfigOption`) for file-type config items.
 
+- **Boolean string coercion ("the truthiness bug")**: KOTS's value-processing pipeline can convert boolean `false` to the string `"false"` when resolving `repl{{ }}` template functions in the HelmChart CR. In Go templates, a non-empty string is truthy, so `{{- if .Values.feature.enabled }}` evaluates to `true` even when the intent is `false`. This causes both conditional branches to render simultaneously. The chart renders correctly with standalone Helm (where booleans stay booleans) but breaks inside KOTS. Use explicit boolean comparison instead of bare truthiness checks: <!-- added: 2026-03-04 -->
+
+  ```yaml
+  # WRONG -- bare truthiness check, breaks with KOTS string coercion:
+  {{- if .Values.rook.enabled }}
+
+  # CORRECT -- explicit boolean comparison, safe with string coercion:
+  {{- if eq .Values.rook.enabled true }}
+  ```
+
 - **Unquoted `when` clauses in Config CR**: Always single-quote `when` values that contain `repl{{ }}` expressions. Unquoted values work in most cases but are fragile and inconsistent with other KOTS CR contexts. <!-- added: 2026-02-27 -->
 
   ```yaml
@@ -1044,6 +1054,7 @@ keywords:
 
 ## Changelog
 
+- **2026-03-04**: Added boolean string coercion ("the truthiness bug") to KOTS Templating Gotchas (Section 3). KOTS can convert boolean `false` to string `"false"`, causing bare `{{- if .Values.x }}` checks to be truthy. Fix: use `{{- if eq .Values.x true }}`.
 - **2026-02-27**: Added findings from StorageBox review (second pass): unquoted `when` clause antipattern in KOTS Config CR (Section 3), runtime package installation air-gap check and detection heuristic (Section 7).
 - **2026-02-27**: Added findings from StorageBox review: Helm Hooks section (hooks on operator-managed CRs, conditional hook trap), Cross-Referencing Checks section (orphan values, subchart image air-gap coverage, Config item when-guard completeness, template hardcoded values).
 - **2026-02-27**: Initial import from CRE Helm Chart Architecture Runbook. Added KOTS templating gotchas section. Added Embedded Cluster review items.
