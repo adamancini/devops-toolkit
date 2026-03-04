@@ -72,6 +72,9 @@ build/
 .vscode/settings.json
 .idea/
 
+# Git worktrees
+.worktrees/
+
 # OS generated files
 Thumbs.db
 Desktop.ini
