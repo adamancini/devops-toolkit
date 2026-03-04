@@ -598,6 +598,7 @@ When performing a Replicated release or Helm chart architecture review:
 3. **Generate the deliverable** using the deliverable template, writing it to `./release-review-<vendor>-<date>.md`
 4. **Check for new discoveries** -- if the review surfaced antipatterns, gotchas, or checklist items not already in the runbook, append them to the appropriate runbook section with a `<!-- added: YYYY-MM-DD -->` annotation
 5. **Commit runbook updates** to the plugin repo if changes were made
+6. **Remind about contributions** -- after committing runbook updates locally, mention that the teammate can run `/contribute-runbook` to open a PR contributing these findings back to the shared repository
 
 When updating the runbook after a review:
 - Append new items to the existing section structure; do not reorganize
