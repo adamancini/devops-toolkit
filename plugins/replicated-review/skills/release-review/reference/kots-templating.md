@@ -83,6 +83,40 @@ annotation_value: repl{{ ConfigOptionEquals "feature_enabled" "1" }}
 
 **Mitigation:** If the chart needs a quoted string, use `ConfigOption` and handle quoting at the Helm template level with `| quote`.
 
+### The Truthiness Bug
+
+A more insidious coercion problem occurs when KOTS converts a boolean value to a string during HelmChart CR value resolution. The boolean `false` becomes the string `"false"`, and in Go templates a non-empty string is truthy:
+
+```yaml
+# HelmChart CR -- KOTS renders this as the string "false", not boolean false
+rook:
+  enabled: repl{{ ConfigOptionEquals "rook_enabled" "1" }}
+```
+
+```yaml
+# Chart template -- BROKEN: "false" (string) is truthy, block renders
+{{- if .Values.rook.enabled }}
+  # This renders even when rook is disabled!
+{{- end }}
+```
+
+This causes both conditional branches to render simultaneously, leading to YAML parse errors or resource conflicts. The chart works correctly with standalone Helm (where booleans stay booleans) but breaks inside KOTS.
+
+**Fix:** Use explicit boolean comparison in chart templates instead of bare truthiness checks:
+
+```yaml
+# WRONG -- bare truthiness, breaks with string coercion:
+{{- if .Values.rook.enabled }}
+
+# CORRECT -- explicit comparison, safe:
+{{- if eq .Values.rook.enabled true }}
+
+# ALSO CORRECT -- handles both string and boolean:
+{{- if and .Values.rook.enabled (ne .Values.rook.enabled "false") }}
+```
+
+**Detection:** Search chart templates for bare `{{- if .Values.<key>.enabled }}` patterns where the value flows through a KOTS HelmChart CR. Any boolean value set via `repl{{ ConfigOptionEquals ... }}` is at risk.
+
 ---
 
 ## 5. optionalValues and recursiveMerge
